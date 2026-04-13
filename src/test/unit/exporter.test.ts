@@ -504,7 +504,8 @@ describe('Edge Cases', () => {
         assert.strictEqual(slugify('test 🎉 emoji 🔥 fire'), 'test-emoji-fire');
     });
 
-    it('E-05: read-only backup dir — writeSession throws', () => {
+    // fs.chmod with POSIX bits has no effect on Windows; skip there
+    (process.platform === 'win32' ? it.skip : it)('E-05: read-only backup dir — writeSession throws', () => {
         const readOnlyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'e05-'));
         const lockedDir = path.join(readOnlyDir, 'locked');
         fs.mkdirSync(lockedDir);
