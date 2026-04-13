@@ -26,7 +26,7 @@ Preserve GitHub Copilot chat sessions that VS Code silently prunes (keeping only
 - Syncing backups to remote/cloud storage
 - Editing or replaying sessions
 - Backing up non-Copilot chat providers (e.g., Cline, Continue)
-- Windows / Linux path support (future work)
+- Export to Obsidian vault format
 
 ## 3. Functional Requirements
 
@@ -87,7 +87,8 @@ Rules:
 - Folder name is the session creation date (`YYYY-MM-DD`), or `undated` if no creation date
 - Multiple sessions from the same date share one folder
 - `topic-slug` is the title lowercased, non-alphanumeric chars replaced with `-`, max 80 chars
-- If the `.json` file already exists, the session is skipped (idempotent)
+- If the `.json` file already exists with the same `sessionId`, the session is skipped (idempotent)
+- If the `.json` file exists with a different `sessionId` (collision), a `-<sessionId[:8]>` suffix is appended
 - Backup directory is created recursively if needed
 
 ### FR-6: Schema Change Detection
@@ -108,6 +109,23 @@ On each export run, the extension:
 |---------|------|---------|-------------|
 | `copilotSessionsKeeper.backupDir` | string | `""` (= `~/copilot-sessions-keeper`) | Output directory. Supports `~` prefix. |
 | `copilotSessionsKeeper.enabled` | boolean | `true` | Enable/disable automatic daily backup |
+| `copilotSessionsKeeper.retentionDays` | number | `0` | Auto-delete backup folders older than N days. 0 = keep forever. |
+
+### FR-8: Incremental Backup
+
+| Property | Value |
+|----------|-------|
+| Mechanism | Track source file `mtimeMs` in `_metadata.json` inside the backup directory |
+| Behavior | Skip parsing files whose mtime matches the stored value |
+| Fallback | If `_metadata.json` is missing or corrupt, re-parse all files |
+
+### FR-9: Retention Policy
+
+| Property | Value |
+|----------|-------|
+| Trigger | After each backup run, if `retentionDays > 0` |
+| Behavior | Delete `YYYY-MM-DD` folders older than the configured retention period |
+| Exclusions | `undated` folder, `_metadata.json`, schema-change reports are never pruned |
 
 ## 4. Non-Functional Requirements
 
@@ -167,13 +185,10 @@ flowchart LR
 | Cannot create backup directory | Show error notification, abort run |
 | Schema change detected | Show warning, write report, continue export |
 | Zero sessions found | Log info, do not update `lastBackupDate` |
-| File name collision (same date + slug) | Second session silently skipped — **known limitation** (see ADR-004). Two sessions with the same date and same title produce identical file names; only the first is exported. |
+| File name collision (same date + slug) | Colliding session exported with `-<sessionId[:8]>` suffix appended to the slug |
 
 ## 7. Future Considerations
 
-- Cross-platform path resolution (Linux: `~/.config/Code/`, Windows: `%APPDATA%\Code\`)
-- Incremental backup (track file modification times, skip unchanged)
 - Session merging when same session is updated across runs
-- File name collision avoidance (append session ID suffix when slug collides)
 - Export to Obsidian vault format
-- Configurable retention/pruning of old backups
+- Syncing backups to cloud storage

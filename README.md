@@ -12,7 +12,11 @@ VS Code keeps only the last ~40 conversation turns per workspace in memory. Olde
 - **Manual backup** — Run `Copilot Sessions Keeper: Backup Now` from the Command Palette at any time
 - **Dual format** — Each session is saved as both `.json` (full data) and `.md` (readable)
 - **Idempotent** — Already-exported sessions are skipped; re-running is safe
+- **Collision-safe** — Sessions with the same date and title get a session-ID suffix instead of being skipped
+- **Incremental** — Tracks source file modification times; unchanged files are skipped on subsequent runs
+- **Retention policy** — Optionally auto-delete backups older than N days
 - **Schema change detection** — Alerts you when VS Code updates change the chat storage format, so the parser can be updated before data is lost
+- **Cross-platform** — Supports macOS, Linux, and Windows
 - **Both session types** — Captures workspace-scoped sessions and empty-window (global) sessions
 
 ## Output Structure
@@ -27,6 +31,7 @@ VS Code keeps only the last ~40 conversation turns per workspace in memory. Olde
 ├── 2026-04-13/
 │   ├── accessing-lm-sessions-in-vscode.json
 │   └── accessing-lm-sessions-in-vscode.md
+├── _metadata.json                         ← incremental backup tracking
 ├── schema-change-2026-04-14.txt          ← only if format changed
 └── ...
 ```
@@ -57,6 +62,7 @@ Or for development, press `F5` in VS Code to launch the Extension Development Ho
 |---------|------|---------|-------------|
 | `copilotSessionsKeeper.backupDir` | string | `~/copilot-sessions-keeper` | Backup output directory |
 | `copilotSessionsKeeper.enabled` | boolean | `true` | Enable automatic daily backup |
+| `copilotSessionsKeeper.retentionDays` | number | `0` | Auto-delete backups older than N days (0 = keep forever) |
 
 ## Commands
 
@@ -77,22 +83,31 @@ See [docs/data-model.md](docs/data-model.md) for details on the storage format.
 
 ## Supported Platforms
 
-- **macOS** — Primary target (reads from `~/Library/Application Support/Code/User/`)
-- **Linux/Windows** — Requires updating the `VSCODE_STORAGE` path (see `src/exporter.ts`)
+| Platform | Storage Path |
+|----------|-------------|
+| **macOS** | `~/Library/Application Support/Code/User/` |
+| **Linux** | `~/.config/Code/User/` |
+| **Windows** | `%APPDATA%/Code/User/` |
+
+Platform is detected automatically at runtime.
 
 ## Project Structure
 
 ```
 copilot-sessions-keeper/
 ├── src/
-│   ├── extension.ts      # Extension lifecycle, daily check, schema alerts
-│   └── exporter.ts       # Session parsing, schema observation, file writing
+│   ├── extension.ts      # Extension lifecycle, daily check, schema alerts, retention
+│   └── exporter.ts       # Session parsing, schema observation, file writing, pruning
+├── src/test/
+│   ├── unit/             # 58 unit tests (parsers, formatting, edge cases, retention)
+│   ├── integration/      # 10 integration tests (full pipeline, incremental backup)
+│   ├── e2e/              # E2E tests (VS Code Extension Host via @vscode/test-electron)
+│   └── fixtures/         # Test session files (JSONL, legacy JSON, workspace.json)
 ├── docs/
 │   ├── functional-spec.md
 │   ├── test-spec.md
 │   ├── data-model.md
 │   └── adr.md            # Architecture Decision Records
-├── CHANGELOG.md
 ├── package.json
 └── tsconfig.json
 ```

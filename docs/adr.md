@@ -12,7 +12,7 @@
 **Consequences:**
 - Works without any VS Code API dependency for data access
 - Breaks if VS Code changes storage paths or file format (mitigated by schema detection)
-- macOS-specific paths hardcoded (Linux/Windows need path updates)
+- ~~macOS-specific paths hardcoded (Linux/Windows need path updates)~~ Resolved: `getVscodeStoragePath()` now detects macOS, Linux, and Windows paths automatically
 
 ---
 
@@ -59,7 +59,8 @@
 **Consequences:**
 - Simple and fast — no content comparison needed
 - Date folders group related sessions for easier browsing
-- A session that grows over time (new turns added) will NOT be re-exported after the initial backup. Incremental updates are a future consideration.
+- ~~A session that grows over time (new turns added) will NOT be re-exported after the initial backup. Incremental updates are a future consideration.~~ Partially resolved: incremental backup via mtime tracking skips unchanged source files. Sessions updated since last export are re-parsed (but the existing output file prevents overwrite via idempotency check).
+- ~~File name collision when two sessions share the same date and slug~~ Resolved: colliding sessions now get a `-<sessionId>` suffix appended to the slug.
 
 ---
 
@@ -76,3 +77,36 @@
 - No native module compilation issues
 - Extension works on any platform without binary distribution concerns
 - Cannot access the session index metadata (timing stats, pending state) — acceptable for backup purposes
+
+---
+
+## ADR-006: Incremental backup via mtime tracking
+
+**Status:** Accepted
+**Date:** 2026-04-14
+
+**Context:** Every export run re-reads and re-parses all session files, even though most are unchanged between runs. For users with many workspaces, this adds unnecessary I/O and CPU overhead.
+
+**Decision:** Track source file modification times (`mtimeMs`) in a `_metadata.json` file inside the backup directory. On each run, skip files whose mtime matches the stored value.
+
+**Consequences:**
+- Significantly faster subsequent runs (only new/modified files are parsed)
+- `_metadata.json` is a simple JSON map; no database needed
+- If `_metadata.json` is deleted, the next run re-parses everything (graceful fallback)
+- Cannot detect sessions deleted from VS Code storage (stale entries in metadata are harmless)
+
+---
+
+## ADR-007: Retention policy for old backups
+
+**Status:** Accepted
+**Date:** 2026-04-14
+
+**Context:** Over months of use, the backup directory accumulates many date folders. Users may want automatic cleanup of old backups.
+
+**Decision:** Add a `retentionDays` configuration setting (default `0` = keep forever). After each backup run, scan for `YYYY-MM-DD` folders older than the retention period and delete them. Non-date folders (`undated`, `_metadata.json`, schema reports) are never pruned.
+
+**Consequences:**
+- Disk usage is bounded for users who enable retention
+- Default of `0` means no data loss for users who don't configure it
+- Only date-named folders are affected; metadata and schema reports are preserved

@@ -103,6 +103,8 @@ src/test/fixtures/
 | U-41 | slugify special chars | `"git reset --hard & push"` | `"git-reset-hard-push"` |
 | U-42 | readWorkspaceName from workspace.json | Mock file with `folder` field | Decoded folder name |
 | U-43 | readWorkspaceName fallback | Missing workspace.json | Returns directory basename |
+| U-44 | getVscodeStoragePath platform path | Current platform | Path ends with platform-appropriate suffix |
+| U-45 | getVscodeStoragePath includes homedir | Current platform | Path starts with homedir or APPDATA |
 
 ---
 
@@ -117,6 +119,9 @@ src/test/fixtures/
 | I-05 | Schema fingerprint returned | Run export | `result.schemaFingerprint` has non-empty arrays |
 | I-06 | Graceful skip on corrupt file | One good + one bad file | Good session exported, bad skipped |
 | I-07 | Empty workspace storage | No chatSessions dirs | Returns `count: 0`, no errors |
+| I-08 | Incremental backup: unchanged skipped | Run export twice, no file changes | Second run: `skippedUnchanged === 1` |
+| I-09 | Incremental backup: modified re-parsed | Run export, touch source file, run again | File re-parsed (mtime changed) |
+| I-10 | Metadata file persists | Run export | `_metadata.json` exists with numeric mtime values |
 
 ---
 
@@ -148,7 +153,18 @@ These require running in the VS Code Extension Development Host.
 | E-05 | Backup dir on read-only filesystem | Error notification, graceful failure |
 | E-06 | Concurrent VS Code windows | Each window may trigger backup; idempotency prevents duplicates |
 | E-07 | Malformed JSON line in JSONL | Entire file skipped (`JSON.parse` throws, caught by caller). No partial session recovery |
-| E-08 | File name collision (same date + same slug) | Second session silently skipped. **Known limitation** — see ADR-004 |
+| E-08 | File name collision (same date + same slug) | Second session exported with `-<sessionId[:8]>` suffix. Idempotent on re-run. |
+
+---
+
+## 5.1 Retention Policy Tests
+
+| ID | Test Case | Expected |
+|----|-----------|----------|
+| R-01 | Folders older than retention period | Old folder deleted, recent folder kept |
+| R-02 | Non-date folders and files | `undated`, `_metadata.json` untouched |
+| R-03 | retentionDays = 0 | Nothing deleted |
+| R-04 | Folders within retention window | 29-day-old kept, 31-day-old pruned |
 
 ---
 
@@ -161,33 +177,26 @@ npm test
 # Watch mode during development
 npm run test:watch
 
+# E2E tests (launches VS Code Extension Host)
+npm run test:e2e
+
 # Manual tests
 # Press F5 in VS Code to launch Extension Development Host
 ```
 
-### Required `package.json` additions (to add)
-
-**Unit and integration tests** (pure Node.js logic, no VS Code API):
+### `package.json` scripts
 
 ```json
 {
   "scripts": {
-    "test": "mocha --require ts-node/register src/test/unit/**/*.test.ts src/test/integration/**/*.test.ts",
-    "test:watch": "mocha --watch --require ts-node/register src/test/**/*.test.ts"
+    "test": "mocha --require ts-node/register 'src/test/unit/**/*.test.ts' 'src/test/integration/**/*.test.ts'",
+    "test:watch": "mocha --watch --require ts-node/register 'src/test/**/*.test.ts'",
+    "test:e2e": "npm run compile && node out/test/e2e/runTest.js"
   },
   "devDependencies": {
     "mocha": "^10.0.0",
     "ts-node": "^10.0.0",
-    "@types/mocha": "^10.0.0"
-  }
-}
-```
-
-**Manual / E2E tests** (require VS Code Extension Host):
-
-```json
-{
-  "devDependencies": {
+    "@types/mocha": "^10.0.0",
     "@vscode/test-electron": "^2.3.0"
   }
 }

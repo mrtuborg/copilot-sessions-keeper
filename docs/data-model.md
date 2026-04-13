@@ -6,9 +6,9 @@
 
 ---
 
-## 1. Storage Locations (macOS)
+## 1. Storage Locations
 
-All paths relative to `~/Library/Application Support/Code/User/`.
+Paths shown for macOS. See §7 for Linux/Windows equivalents. All paths relative to the platform-specific VS Code user data directory (e.g. `~/Library/Application Support/Code/User/` on macOS).
 
 ### 1.1 Workspace-Scoped Sessions
 
@@ -281,4 +281,4 @@ The fingerprint is stored in `globalState` under key `knownSchemaFingerprint`. O
 | Windows | `%APPDATA%\Code\User\` |
 | VS Code Insiders | Replace `Code` with `Code - Insiders` |
 
-Currently only macOS is supported. See `VSCODE_STORAGE` in `src/exporter.ts`.
+Platform is detected automatically by `getVscodeStoragePath()` in `src/exporter.ts`.
