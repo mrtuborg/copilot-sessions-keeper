@@ -41,15 +41,28 @@ export interface SchemaFingerprint {
 export interface ExportResult {
     count: number;
     schemaFingerprint: SchemaFingerprint;
+    skippedUnchanged: number;
 }
 
-const VSCODE_STORAGE = path.join(
-    os.homedir(),
-    'Library',
-    'Application Support',
-    'Code',
-    'User'
-);
+/**
+ * Return the default VS Code user-data directory for the current platform.
+ *   macOS  : ~/Library/Application Support/Code/User
+ *   Linux  : ~/.config/Code/User
+ *   Windows: %APPDATA%/Code/User
+ */
+export function getVscodeStoragePath(): string {
+    switch (process.platform) {
+        case 'darwin':
+            return path.join(os.homedir(), 'Library', 'Application Support', 'Code', 'User');
+        case 'win32':
+            return path.join(process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'), 'Code', 'User');
+        case 'linux':
+        default:
+            return path.join(os.homedir(), '.config', 'Code', 'User');
+    }
+}
+
+const VSCODE_STORAGE = getVscodeStoragePath();
 
 // Accumulates structural observations during a single export run.
 let _schemaObserver: SchemaObserver;
@@ -128,12 +141,35 @@ export function diffFingerprints(
 /**
  * Export all Copilot chat sessions to dated folders.
  * Returns the count and an observed schema fingerprint.
+ *
+ * Tracks source file modification times in `_metadata.json` inside the
+ * backup directory so unchanged files are skipped on subsequent runs.
  */
 export async function exportAllSessions(backupDir: string, storageRoot?: string): Promise<ExportResult> {
     fs.mkdirSync(backupDir, { recursive: true });
     _schemaObserver = new SchemaObserver();
     let count = 0;
+    let skippedUnchanged = 0;
     const root = storageRoot ?? VSCODE_STORAGE;
+    const mtimeMap = loadMtimeMap(backupDir);
+    const newMtimeMap: Record<string, number> = {};
+
+    const processFile = (filePath: string, parse: () => Session | null) => {
+        const mtime = fs.statSync(filePath).mtimeMs;
+        newMtimeMap[filePath] = mtime;
+
+        if (mtimeMap[filePath] === mtime) {
+            skippedUnchanged++;
+            return; // File unchanged since last export
+        }
+
+        const session = parse();
+        if (session && session.turns.length > 0) {
+            if (writeSession(session, backupDir)) {
+                count++;
+            }
+        }
+    };
 
     // 1. Workspace-scoped sessions (chatSessions/*.jsonl)
     const wsRoot = path.join(root, 'workspaceStorage');
@@ -148,11 +184,8 @@ export async function exportAllSessions(backupDir: string, storageRoot?: string)
             for (const file of fs.readdirSync(chatDir)) {
                 if (!file.endsWith('.jsonl')) { continue; }
                 try {
-                    const session = parseJsonl(path.join(chatDir, file), workspace);
-                    if (session && session.turns.length > 0) {
-                        writeSession(session, backupDir);
-                        count++;
-                    }
+                    const filePath = path.join(chatDir, file);
+                    processFile(filePath, () => parseJsonl(filePath, workspace));
                 } catch (e) {
                     console.warn(`[copilot-sessions-keeper] skipped ${file}: ${e}`);
                 }
@@ -166,15 +199,10 @@ export async function exportAllSessions(backupDir: string, storageRoot?: string)
         for (const file of fs.readdirSync(emptyDir)) {
             const filePath = path.join(emptyDir, file);
             try {
-                let session: Session | null = null;
                 if (file.endsWith('.json')) {
-                    session = parseLegacyJson(filePath);
+                    processFile(filePath, () => parseLegacyJson(filePath));
                 } else if (file.endsWith('.jsonl')) {
-                    session = parseJsonl(filePath, '(no workspace)');
-                }
-                if (session && session.turns.length > 0) {
-                    writeSession(session, backupDir);
-                    count++;
+                    processFile(filePath, () => parseJsonl(filePath, '(no workspace)'));
                 }
             } catch (e) {
                 console.warn(`[copilot-sessions-keeper] skipped ${file}: ${e}`);
@@ -182,7 +210,8 @@ export async function exportAllSessions(backupDir: string, storageRoot?: string)
         }
     }
 
-    return { count, schemaFingerprint: _schemaObserver.toFingerprint() };
+    saveMtimeMap(backupDir, newMtimeMap);
+    return { count, schemaFingerprint: _schemaObserver.toFingerprint(), skippedUnchanged };
 }
 
 /* ------------------------------------------------------------------ */
@@ -321,23 +350,42 @@ export function extractTurn(req: any): Turn | null {
 /*  Write session to disk                                             */
 /* ------------------------------------------------------------------ */
 
-export function writeSession(session: Session, backupDir: string): void {
+export function writeSession(session: Session, backupDir: string): boolean {
     const dateStr = session.creationDate
         ? new Date(session.creationDate).toISOString().slice(0, 10)
         : 'undated';
-    const slug = slugify(session.title || session.sessionId);
+    const baseSlug = slugify(session.title || session.sessionId);
     const outDir = path.join(backupDir, dateStr);
 
     fs.mkdirSync(outDir, { recursive: true });
 
+    // Resolve the final slug: if a file already exists, check whether it
+    // belongs to the same session (idempotent skip) or a different one
+    // (collision → append a short session-id suffix).
+    let slug = baseSlug;
     const jsonPath = path.join(outDir, `${slug}.json`);
 
-    // If file already exists, skip (idempotent)
-    if (fs.existsSync(jsonPath)) { return; }
+    if (fs.existsSync(jsonPath)) {
+        try {
+            const existing = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+            if (existing.sessionId === session.sessionId) {
+                return false; // Same session — idempotent skip
+            }
+        } catch { /* corrupt file — treat as collision */ }
+
+        // Different session with the same slug — append session ID suffix
+        const suffix = session.sessionId.slice(0, 8);
+        slug = `${baseSlug}-${suffix}`;
+
+        const altJsonPath = path.join(outDir, `${slug}.json`);
+        if (fs.existsSync(altJsonPath)) {
+            return false; // Already exported with suffixed name
+        }
+    }
 
     // JSON – full fidelity
     fs.writeFileSync(
-        jsonPath,
+        path.join(outDir, `${slug}.json`),
         JSON.stringify(session, null, 2),
         'utf-8'
     );
@@ -348,6 +396,8 @@ export function writeSession(session: Session, backupDir: string): void {
         formatMarkdown(session),
         'utf-8'
     );
+
+    return true;
 }
 
 /* ------------------------------------------------------------------ */
@@ -407,4 +457,47 @@ export function readWorkspaceName(wsDir: string): string {
     } catch {
         return path.basename(wsDir);
     }
+}
+
+const MTIME_FILE = '_metadata.json';
+
+export function loadMtimeMap(backupDir: string): Record<string, number> {
+    const filePath = path.join(backupDir, MTIME_FILE);
+    try {
+        return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    } catch {
+        return {};
+    }
+}
+
+export function saveMtimeMap(backupDir: string, map: Record<string, number>): void {
+    fs.writeFileSync(path.join(backupDir, MTIME_FILE), JSON.stringify(map, null, 2), 'utf-8');
+}
+
+/**
+ * Delete date-named backup folders older than `retentionDays`.
+ * Only removes directories matching YYYY-MM-DD pattern.
+ * Returns the number of folders deleted.
+ */
+export function pruneOldBackups(backupDir: string, retentionDays: number): number {
+    if (retentionDays <= 0) { return 0; }
+
+    const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+    let deleted = 0;
+
+    for (const entry of fs.readdirSync(backupDir)) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(entry)) { continue; }
+
+        const folderDate = new Date(entry + 'T00:00:00Z').getTime();
+        if (isNaN(folderDate)) { continue; }
+
+        if (folderDate < cutoff) {
+            const folderPath = path.join(backupDir, entry);
+            fs.rmSync(folderPath, { recursive: true, force: true });
+            deleted++;
+            console.log(`[copilot-sessions-keeper] pruned old backup: ${entry}`);
+        }
+    }
+
+    return deleted;
 }

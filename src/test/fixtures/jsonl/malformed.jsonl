@@ -1,0 +1,4 @@
+{"kind":0,"v":{"version":3,"creationDate":1712966400000,"sessionId":"malformed-id"}}
+{"kind":1,"v":"Malformed Session"}
+not valid json {{{
+{"kind":2,"v":[{"requestId":"req_001","timestamp":1712966500000,"message":{"parts":[{"text":"hello"}]},"response":[{"value":"world"}]}]}

@@ -3,6 +3,7 @@ import {
     exportAllSessions,
     fingerprintToString,
     diffFingerprints,
+    pruneOldBackups,
     type SchemaFingerprint,
     type ExportResult,
 } from './exporter';
@@ -58,6 +59,16 @@ async function runBackup(context: vscode.ExtensionContext, backupDir: string, tr
 
         // Schema change detection
         await checkSchemaChange(context, result.schemaFingerprint, backupDir);
+
+        // Retention policy
+        const retentionDays = vscode.workspace.getConfiguration('copilotSessionsKeeper')
+            .get<number>('retentionDays', 0);
+        if (retentionDays > 0) {
+            const deleted = pruneOldBackups(backupDir, retentionDays);
+            if (deleted > 0) {
+                console.log(`[copilot-sessions-keeper] pruned ${deleted} old backup folder(s)`);
+            }
+        }
 
         return result.count;
     } catch (err: any) {

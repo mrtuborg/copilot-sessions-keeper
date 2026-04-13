@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "responderUsername": "GitHub Copilot",
+  "initialLocation": "panel",
+  "customTitle": "Legacy Single Request",
+  "requests": [
+    {
+      "requestId": "req_legacy_001",
+      "message": { "parts": [{ "text": "What is Node.js?" }] },
+      "variableData": {},
+      "response": [{ "value": "Node.js is a JavaScript runtime built on Chrome's V8 engine." }],
+      "agent": {},
+      "timestamp": 1712966500000,
+      "modelId": "claude-opus-4.6",
+      "responseId": "resp_legacy_001",
+      "result": {},
+      "modelState": {},
+      "contentReferences": [],
+      "codeCitations": [],
+      "timeSpentWaiting": 0
+    }
+  ],
+  "sessionId": "legacy-single-id",
+  "creationDate": 1712966400000
+}
