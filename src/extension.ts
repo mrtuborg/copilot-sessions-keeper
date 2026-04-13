@@ -26,20 +26,29 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Auto-backup on first session of the day
     if (enabled) {
-        const lastBackup = context.globalState.get<string>('lastBackupDate');
-        const today = new Date().toISOString().slice(0, 10);
+        const tryDailyBackup = () => {
+            const lastBackup = context.globalState.get<string>('lastBackupDate');
+            const today = new Date().toISOString().slice(0, 10);
 
-        if (lastBackup !== today) {
-            const backupDir = getBackupDir();
-            runBackup(context, backupDir, 'auto').then(async (count) => {
-                if (count > 0) {
-                    await context.globalState.update('lastBackupDate', today);
-                    vscode.window.showInformationMessage(
-                        `Copilot Sessions Keeper: exported ${count} sessions to ${backupDir}`
-                    );
-                }
-            });
-        }
+            if (lastBackup !== today) {
+                const backupDir = getBackupDir();
+                runBackup(context, backupDir, 'auto').then(async (count) => {
+                    if (count > 0) {
+                        await context.globalState.update('lastBackupDate', today);
+                        vscode.window.showInformationMessage(
+                            `Copilot Sessions Keeper: exported ${count} sessions to ${backupDir}`
+                        );
+                    }
+                });
+            }
+        };
+
+        // Run immediately on activation
+        tryDailyBackup();
+
+        // Re-check every hour for long-running sessions that span midnight
+        const timer = setInterval(tryDailyBackup, 60 * 60 * 1000);
+        context.subscriptions.push({ dispose: () => clearInterval(timer) });
     }
 }
 
