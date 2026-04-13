@@ -1,0 +1,52 @@
+{
+  "name": "copilot-sessions-keeper",
+  "displayName": "Copilot Sessions Keeper",
+  "description": "Automatically backs up Copilot chat sessions on the first launch of each day",
+  "version": "0.1.0",
+  "license": "MIT",
+  "publisher": "vn",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "copilotSessionsKeeper.backupNow",
+        "title": "Copilot Sessions Keeper: Backup Now"
+      }
+    ],
+    "configuration": {
+      "title": "Copilot Sessions Keeper",
+      "properties": {
+        "copilotSessionsKeeper.backupDir": {
+          "type": "string",
+          "default": "",
+          "description": "Directory to store backups. Defaults to ~/copilot-sessions-keeper"
+        },
+        "copilotSessionsKeeper.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable automatic daily backup on first session"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "mocha --require ts-node/register 'src/test/unit/**/*.test.ts' 'src/test/integration/**/*.test.ts'",
+    "test:watch": "mocha --watch --require ts-node/register 'src/test/**/*.test.ts'",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.0",
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "mocha": "^10.0.0",
+    "ts-node": "^10.0.0",
+    "typescript": "^5.3.0"
+  }
+}

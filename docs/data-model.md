@@ -1,0 +1,284 @@
+# Data Model: VS Code Copilot Chat Session Storage
+
+**Last verified:** April 2026 (VS Code ~1.99, Copilot Chat 0.43)
+
+> **Warning:** This format is internal to VS Code and undocumented. It can change between updates without notice. The extension includes [schema change detection](../README.md#schema-change-detection) to catch such changes.
+
+---
+
+## 1. Storage Locations (macOS)
+
+All paths relative to `~/Library/Application Support/Code/User/`.
+
+### 1.1 Workspace-Scoped Sessions
+
+```
+workspaceStorage/<workspace-hash>/
+├── workspace.json                              # Maps hash → folder URI
+├── state.vscdb                                 # SQLite — session index + metadata
+├── chatSessions/
+│   ├── <session-uuid>.jsonl                    # ✅ Full conversation content
+│   └── ...
+└── chatEditingSessions/
+    └── <session-uuid>/state.json               # File edit state only (not chat content)
+```
+
+### 1.2 Empty-Window Sessions (No Workspace)
+
+```
+globalStorage/
+├── state.vscdb                                 # Global session index
+└── emptyWindowChatSessions/
+    ├── <session-uuid>.json                     # Legacy format (older VS Code)
+    ├── <session-uuid>.jsonl                    # Current JSONL format
+    └── ...
+```
+
+### 1.3 Session Index
+
+Located in `state.vscdb` (SQLite, table `ItemTable`):
+
+| Key | Content |
+|-----|---------|
+| `chat.ChatSessionStore.index` | JSON object mapping session IDs to metadata |
+| `memento/interactive-session` | Last ~40 user request texts (no responses) |
+
+The index entry per session:
+
+```json
+{
+  "sessionId": "240f9c36-9d40-469e-b5ec-4e8945024ba5",
+  "title": "Manual trigger for clean build setup",
+  "lastMessageDate": 1774429173938,
+  "timing": {
+    "created": 1774427809212,
+    "lastRequestStarted": 1774429173938,
+    "lastRequestEnded": 1774429186582
+  },
+  "initialLocation": "panel",
+  "hasPendingEdits": false,
+  "isEmpty": false,
+  "isExternal": false,
+  "lastResponseState": 1
+}
+```
+
+---
+
+## 2. JSONL Format (Current)
+
+Each `.jsonl` file is an append-only log of mutations. Each line is a JSON object with `kind` (integer) and `v` (value).
+
+### 2.1 Entry Kinds
+
+| Kind | Purpose | Value Type |
+|------|---------|------------|
+| `0` | **Initialize** — session metadata | Object (see §2.2) |
+| `1` | **Mutation** — incremental updates | Mixed (see §2.3) |
+| `2` | **Request batch** — full request/response pairs | Array of request objects (see §2.4) |
+
+### 2.2 Kind 0: Initialization Object
+
+```json
+{
+  "kind": 0,
+  "v": {
+    "version": 3,
+    "creationDate": 1774427809212,
+    "initialLocation": "panel",
+    "responderUsername": "GitHub Copilot",
+    "sessionId": "240f9c36-9d40-469e-b5ec-4e8945024ba5",
+    "hasPendingEdits": false,
+    "requests": [],
+    "pendingRequests": [],
+    "inputState": {
+      "attachments": [],
+      "mode": { "id": "agent", "kind": "agent" }
+    }
+  }
+}
+```
+
+Known init keys: `version`, `creationDate`, `initialLocation`, `responderUsername`, `sessionId`, `hasPendingEdits`, `requests`, `pendingRequests`, `inputState`.
+
+### 2.3 Kind 1: Mutations
+
+Kind 1 carries incremental updates. The `v` value type varies:
+
+| Value Type | Interpretation |
+|------------|----------------|
+| `string` (first one > 1 char) | Session title |
+| `string` (subsequent) | User input text for a request |
+| `{ "value": number }` | Status/state change (e.g., response state) |
+| `Array` of selection ranges | Editor cursor positions |
+| `{ "timings": ..., "renderedUserMessage": ... }` | Request metadata |
+| `[]` (empty array) | Followup/continuation markers |
+
+### 2.4 Kind 2: Request Batch
+
+An array of request objects, each containing the full request and response:
+
+```json
+{
+  "kind": 2,
+  "v": [
+    {
+      "requestId": "request_814d73aa-...",
+      "timestamp": 1774428334299,
+      "agent": { "extensionId": { ... }, "id": "copilot" },
+      "modelId": "claude-opus-4.6",
+      "responseId": "response_...",
+      "modelState": {},
+      "contentReferences": [...],
+      "codeCitations": [],
+      "timeSpentWaiting": 0,
+      "modeInfo": { ... },
+      "response": [ ... ],          // ← Response parts (see §3)
+      "message": {                   // ← User message
+        "parts": [
+          { "text": "I want a clean build by separate manual trigger", "range": { ... } }
+        ]
+      },
+      "variableData": { ... }
+    }
+  ]
+}
+```
+
+Known request keys: `requestId`, `timestamp`, `agent`, `modelId`, `responseId`, `modelState`, `contentReferences`, `codeCitations`, `timeSpentWaiting`, `modeInfo`, `response`, `message`, `variableData`.
+
+---
+
+## 3. Response Parts
+
+The `response` array inside a request object contains ordered content blocks:
+
+| `kind` | Description | `value` |
+|--------|-------------|---------|
+| `"thinking"` | Extended thinking / chain-of-thought | String |
+| _(undefined/absent)_ | **Assistant markdown text** — the actual answer | String (may contain markdown, URIs) |
+| `"markdownContent"` | Explicit markdown content (rare, overlaps with above) | String |
+| `"textEditGroup"` | Code edit applied to file | Object with edit details |
+| `"toolInvocationSerialized"` | Tool call summary | Object with `invocationMessage`, `pastTenseMessage` |
+| `"inlineReference"` | File/symbol reference | Object with `inlineReference.uri.path` |
+| `"mcpServersStarting"` | MCP server initialization | Object (metadata, skip) |
+| `"progressMessage"` | Progress indicator | Object (metadata, skip) |
+
+**Key insight:** The primary assistant response text has `kind: undefined` (the `kind` property is absent). The `value` field contains the markdown text, sometimes with `supportThemeIcons`, `supportHtml`, `baseUri`, and `uris` properties.
+
+---
+
+## 4. Legacy JSON Format
+
+Older sessions in `emptyWindowChatSessions/*.json`:
+
+```json
+{
+  "version": 1,
+  "responderUsername": "GitHub Copilot",
+  "responderAvatarIconUri": { ... },
+  "initialLocation": "panel",
+  "requests": [
+    {
+      "requestId": "...",
+      "message": { "parts": [{ "text": "user question", ... }] },
+      "variableData": { ... },
+      "response": [ /* same response part format as §3 */ ],
+      "agent": { ... },
+      "timestamp": 1759142009727,
+      "modelId": "claude-opus-4.6",
+      "responseId": "...",
+      "result": { "timings": { ... }, "metadata": { ... } },
+      "responseMarkdownInfo": [ ... ],
+      "followups": [ ... ],
+      "modelState": { ... },
+      "contentReferences": [ ... ],
+      "codeCitations": [],
+      "timeSpentWaiting": 0
+    }
+  ],
+  "sessionId": "5584e2a9-...",
+  "creationDate": 1759137838843,
+  "lastMessageDate": 1759142009727,
+  "customTitle": "Enabling additional Copilot models in VS Code",
+  "hasPendingEdits": false,
+  "inputState": { ... }
+}
+```
+
+Known session keys: `version`, `responderUsername`, `responderAvatarIconUri`, `initialLocation`, `requests`, `sessionId`, `creationDate`, `lastMessageDate`, `customTitle`, `hasPendingEdits`, `inputState`.
+
+Known request keys: `requestId`, `message`, `variableData`, `response`, `agent`, `timestamp`, `modelId`, `responseId`, `result`, `responseMarkdownInfo`, `followups`, `modelState`, `contentReferences`, `codeCitations`, `timeSpentWaiting`.
+
+---
+
+## 5. Schema Fingerprint
+
+The extension tracks the following observed structural properties:
+
+```typescript
+interface SchemaFingerprint {
+    jsonlKinds: number[];           // e.g. [0, 1, 2]
+    initKeys: string[];             // Keys in kind=0 object
+    requestKeys: string[];          // Keys in request objects (kind=2)
+    responsePartKinds: string[];    // Values of response[].kind
+    legacySessionKeys: string[];    // Top-level keys in legacy JSON
+    legacyRequestKeys: string[];    // Keys in legacy request objects
+}
+```
+
+The fingerprint is stored in `globalState` under key `knownSchemaFingerprint`. On each export run, the observed fingerprint is compared to the stored one. A diff triggers a user notification.
+
+### Example Baseline Fingerprint
+
+```json
+{
+  "jsonlKinds": [0, 1, 2],
+  "initKeys": ["creationDate", "hasPendingEdits", "initialLocation",
+               "inputState", "pendingRequests", "requests",
+               "responderUsername", "sessionId", "version"],
+  "requestKeys": ["agent", "codeCitations", "contentReferences",
+                   "message", "modelId", "modelState", "modeInfo",
+                   "requestId", "response", "responseId",
+                   "timeSpentWaiting", "timestamp", "variableData"],
+  "responsePartKinds": ["(no-kind)", "inlineReference",
+                        "mcpServersStarting", "textEditGroup",
+                        "thinking", "toolInvocationSerialized"],
+  "legacySessionKeys": ["creationDate", "customTitle", "hasPendingEdits",
+                        "initialLocation", "inputState", "lastMessageDate",
+                        "requests", "responderAvatarIconUri",
+                        "responderUsername", "sessionId", "version"],
+  "legacyRequestKeys": ["agent", "codeCitations", "contentReferences",
+                        "message", "modelId", "modelState", "requestId",
+                        "response", "responseId", "responseMarkdownInfo",
+                        "result", "timeSpentWaiting", "timestamp",
+                        "variableData"]
+}
+```
+
+---
+
+## 6. What Is NOT Stored
+
+| Data | Stored? | Notes |
+|------|---------|-------|
+| Assistant response text | Yes | In response parts within kind=2 entries |
+| User request text | Yes | In `message.parts[].text` |
+| Extended thinking | Yes | In response parts with `kind: "thinking"` |
+| File edit diffs | Partial | `textEditGroup` has URI but not full diff |
+| Attached files content | No | Only references; original file content not embedded |
+| Tool call outputs | Partial | Tool invocation messages stored; detailed output may be truncated |
+| Image attachments | No | References only |
+
+---
+
+## 7. Platform Paths
+
+| Platform | Base Path |
+|----------|-----------|
+| macOS | `~/Library/Application Support/Code/User/` |
+| Linux | `~/.config/Code/User/` |
+| Windows | `%APPDATA%\Code\User\` |
+| VS Code Insiders | Replace `Code` with `Code - Insiders` |
+
+Currently only macOS is supported. See `VSCODE_STORAGE` in `src/exporter.ts`.
