@@ -5,6 +5,10 @@
   "version": "0.1.0",
   "license": "MIT",
   "publisher": "vn",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mrtuborg/copilot-sessions-keeper"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },

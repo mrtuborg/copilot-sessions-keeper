@@ -1,3 +1,4 @@
 node_modules/
 out/
 *.vsix
+copilot-sessions-keeper-*.vsix

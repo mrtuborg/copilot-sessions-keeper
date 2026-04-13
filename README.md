@@ -1,5 +1,7 @@
 # Copilot Sessions Keeper
 
+[![CI](https://github.com/mrtuborg/copilot-sessions-keeper/actions/workflows/ci.yml/badge.svg)](https://github.com/mrtuborg/copilot-sessions-keeper/actions/workflows/ci.yml)
+
 A VS Code extension that automatically backs up GitHub Copilot chat sessions to local files — JSON for full fidelity, Markdown for human reading.
 
 ## Why
