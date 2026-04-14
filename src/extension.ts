@@ -64,10 +64,16 @@ function getBackupDir(): string {
 async function runBackup(context: vscode.ExtensionContext, backupDir: string, trigger: string): Promise<number> {
     try {
         const result: ExportResult = await exportAllSessions(backupDir);
-        console.log(`[copilot-sessions-keeper] ${trigger}: exported ${result.count} sessions to ${backupDir}`);
+        console.log(`[copilot-sessions-keeper] ${trigger}: exported ${result.count} sessions, skipped ${result.skippedUnchanged} unchanged`);
 
-        // Schema change detection
-        await checkSchemaChange(context, result.schemaFingerprint, backupDir);
+        // Schema change detection — only when files were actually parsed
+        // (if all files were skipped via mtime, the fingerprint is empty
+        // and would falsely report "everything removed")
+        const fp = result.schemaFingerprint;
+        const hasParsedData = fp.jsonlKinds.length > 0 || fp.legacySessionKeys.length > 0;
+        if (hasParsedData) {
+            await checkSchemaChange(context, fp, backupDir);
+        }
 
         // Retention policy
         const retentionDays = vscode.workspace.getConfiguration('copilotSessionsKeeper')
