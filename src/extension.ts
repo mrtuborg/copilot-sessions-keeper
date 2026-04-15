@@ -5,14 +5,19 @@ import {
     diffFingerprints,
     diffFingerprintsAdditionsOnly,
     mergeFingerprints,
+    updateUsageStats,
+    emptyUsageStats,
+    formatUsageStats,
     pruneOldBackups,
     type SchemaFingerprint,
+    type SchemaUsageStats,
     type ExportResult,
 } from './exporter';
 import * as path from 'path';
 import * as os from 'os';
 
 const SCHEMA_STATE_KEY = 'knownSchemaFingerprint';
+const SCHEMA_USAGE_KEY = 'schemaUsageStats';
 
 export function activate(context: vscode.ExtensionContext) {
     const config = vscode.workspace.getConfiguration('copilotSessionsKeeper');
@@ -112,6 +117,12 @@ async function checkSchemaChange(
     backupDir: string
 ): Promise<void> {
     const stored = context.globalState.get<SchemaFingerprint>(SCHEMA_STATE_KEY);
+    const today = new Date().toISOString().slice(0, 10);
+
+    // Update per-key usage stats (always, even on first run)
+    const prevStats = context.globalState.get<SchemaUsageStats>(SCHEMA_USAGE_KEY) ?? emptyUsageStats();
+    const updatedStats = updateUsageStats(prevStats, current, today);
+    await context.globalState.update(SCHEMA_USAGE_KEY, updatedStats);
 
     if (!stored) {
         // First run — save baseline
@@ -133,7 +144,7 @@ async function checkSchemaChange(
     }
 
     // Schema expanded — build a diff report
-    const reportPath = path.join(backupDir, `schema-change-${new Date().toISOString().slice(0, 10)}.txt`);
+    const reportPath = path.join(backupDir, `schema-change-${today}.txt`);
     const report = [
         'Copilot Sessions Keeper — Data Model Change Detected',
         `Date: ${new Date().toISOString()}`,
@@ -149,6 +160,9 @@ async function checkSchemaChange(
         '',
         '=== FULL DIFF (including removals from this run, possibly just partial observation) ===',
         diffFingerprints(stored, current) ?? '(none)',
+        '',
+        '=== KEY USAGE STATS (lastSeen, observation count) ===',
+        formatUsageStats(updatedStats),
         '',
         '=== PREVIOUS FINGERPRINT ===',
         JSON.stringify(stored, null, 2),

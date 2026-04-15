@@ -44,6 +44,107 @@ export interface ExportResult {
     skippedUnchanged: number;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Schema usage statistics                                           */
+/* ------------------------------------------------------------------ */
+
+/** Per-key usage tracking: when we last saw it and how many runs included it. */
+export interface KeyUsage {
+    /** ISO date string (YYYY-MM-DD) of the last run that observed this key */
+    lastSeen: string;
+    /** Total number of export runs that observed this key */
+    count: number;
+}
+
+/**
+ * Tracks per-key usage across export runs so we can distinguish
+ * "key removed from schema" from "key just not seen in this run."
+ *
+ * Each category maps key-name → { lastSeen, count }.
+ */
+export interface SchemaUsageStats {
+    jsonlKinds: Record<string, KeyUsage>;
+    initKeys: Record<string, KeyUsage>;
+    requestKeys: Record<string, KeyUsage>;
+    responsePartKinds: Record<string, KeyUsage>;
+    legacySessionKeys: Record<string, KeyUsage>;
+    legacyRequestKeys: Record<string, KeyUsage>;
+}
+
+/** Return a fresh empty stats object. */
+export function emptyUsageStats(): SchemaUsageStats {
+    return {
+        jsonlKinds: {}, initKeys: {}, requestKeys: {},
+        responsePartKinds: {}, legacySessionKeys: {}, legacyRequestKeys: {},
+    };
+}
+
+/**
+ * Merge a run's observed fingerprint into the cumulative usage stats.
+ * Keys present in this run get their count incremented and lastSeen updated.
+ * Keys NOT in this run are left unchanged (preserving their historical stats).
+ */
+export function updateUsageStats(
+    stored: SchemaUsageStats,
+    observed: SchemaFingerprint,
+    today: string,
+): SchemaUsageStats {
+    const result: SchemaUsageStats = {
+        jsonlKinds: { ...stored.jsonlKinds },
+        initKeys: { ...stored.initKeys },
+        requestKeys: { ...stored.requestKeys },
+        responsePartKinds: { ...stored.responsePartKinds },
+        legacySessionKeys: { ...stored.legacySessionKeys },
+        legacyRequestKeys: { ...stored.legacyRequestKeys },
+    };
+
+    const bump = (map: Record<string, KeyUsage>, keys: (string | number)[]) => {
+        for (const k of keys) {
+            const key = String(k);
+            const prev = map[key];
+            map[key] = {
+                lastSeen: today,
+                count: (prev?.count ?? 0) + 1,
+            };
+        }
+    };
+
+    bump(result.jsonlKinds, observed.jsonlKinds);
+    bump(result.initKeys, observed.initKeys);
+    bump(result.requestKeys, observed.requestKeys);
+    bump(result.responsePartKinds, observed.responsePartKinds);
+    bump(result.legacySessionKeys, observed.legacySessionKeys);
+    bump(result.legacyRequestKeys, observed.legacyRequestKeys);
+
+    return result;
+}
+
+/**
+ * Format usage stats as a human-readable summary for the schema report.
+ * Shows each category with key, last-seen date, and observation count.
+ */
+export function formatUsageStats(stats: SchemaUsageStats): string {
+    const lines: string[] = [];
+
+    const section = (label: string, map: Record<string, KeyUsage>) => {
+        const entries = Object.entries(map).sort(([a], [b]) => a.localeCompare(b));
+        if (entries.length === 0) { return; }
+        lines.push(`  ${label}:`);
+        for (const [key, usage] of entries) {
+            lines.push(`    ${key}: lastSeen=${usage.lastSeen}, count=${usage.count}`);
+        }
+    };
+
+    section('JSONL kinds', stats.jsonlKinds);
+    section('Init keys', stats.initKeys);
+    section('Request keys', stats.requestKeys);
+    section('Response part kinds', stats.responsePartKinds);
+    section('Legacy session keys', stats.legacySessionKeys);
+    section('Legacy request keys', stats.legacyRequestKeys);
+
+    return lines.length > 0 ? lines.join('\n') : '(no stats)';
+}
+
 /**
  * Return the default VS Code user-data directory for the current platform.
  *   macOS  : ~/Library/Application Support/Code/User

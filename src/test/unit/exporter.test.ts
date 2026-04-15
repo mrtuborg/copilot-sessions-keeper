@@ -14,11 +14,15 @@ import {
     diffFingerprints,
     diffFingerprintsAdditionsOnly,
     mergeFingerprints,
+    updateUsageStats,
+    emptyUsageStats,
+    formatUsageStats,
     getVscodeStoragePath,
     pruneOldBackups,
     _resetSchemaObserver,
     SchemaObserver,
     type SchemaFingerprint,
+    type SchemaUsageStats,
     type Session,
 } from '../../exporter';
 
@@ -387,6 +391,67 @@ describe('Schema Fingerprinting', () => {
         };
         const merged = mergeFingerprints(fp, fp);
         assert.deepStrictEqual(merged, fp);
+    });
+
+    it('U-29: updateUsageStats bumps count and lastSeen for observed keys', () => {
+        const stats = emptyUsageStats();
+        const fp: SchemaFingerprint = {
+            jsonlKinds: [0, 1], initKeys: ['sessionId', 'version'], requestKeys: [],
+            responsePartKinds: ['thinking'], legacySessionKeys: [], legacyRequestKeys: [],
+        };
+        const updated = updateUsageStats(stats, fp, '2026-04-15');
+        assert.deepStrictEqual(updated.jsonlKinds['0'], { lastSeen: '2026-04-15', count: 1 });
+        assert.deepStrictEqual(updated.jsonlKinds['1'], { lastSeen: '2026-04-15', count: 1 });
+        assert.deepStrictEqual(updated.initKeys['sessionId'], { lastSeen: '2026-04-15', count: 1 });
+        assert.deepStrictEqual(updated.responsePartKinds['thinking'], { lastSeen: '2026-04-15', count: 1 });
+    });
+
+    it('U-29b: updateUsageStats increments on subsequent runs', () => {
+        let stats = emptyUsageStats();
+        const fp: SchemaFingerprint = {
+            jsonlKinds: [0], initKeys: ['sessionId'], requestKeys: [],
+            responsePartKinds: [], legacySessionKeys: [], legacyRequestKeys: [],
+        };
+        stats = updateUsageStats(stats, fp, '2026-04-14');
+        stats = updateUsageStats(stats, fp, '2026-04-15');
+        assert.strictEqual(stats.initKeys['sessionId'].count, 2);
+        assert.strictEqual(stats.initKeys['sessionId'].lastSeen, '2026-04-15');
+    });
+
+    it('U-29c: updateUsageStats preserves keys not in current run', () => {
+        let stats = emptyUsageStats();
+        const run1: SchemaFingerprint = {
+            jsonlKinds: [0], initKeys: ['sessionId', 'version'], requestKeys: [],
+            responsePartKinds: ['thinking'], legacySessionKeys: [], legacyRequestKeys: [],
+        };
+        const run2: SchemaFingerprint = {
+            jsonlKinds: [0], initKeys: ['sessionId'], requestKeys: [],
+            responsePartKinds: [], legacySessionKeys: [], legacyRequestKeys: [],
+        };
+        stats = updateUsageStats(stats, run1, '2026-04-14');
+        stats = updateUsageStats(stats, run2, '2026-04-15');
+        // 'version' was only in run1 — should be preserved with original stats
+        assert.strictEqual(stats.initKeys['version'].count, 1);
+        assert.strictEqual(stats.initKeys['version'].lastSeen, '2026-04-14');
+        // 'sessionId' was in both — should be incremented
+        assert.strictEqual(stats.initKeys['sessionId'].count, 2);
+        assert.strictEqual(stats.initKeys['sessionId'].lastSeen, '2026-04-15');
+    });
+
+    it('U-29d: formatUsageStats produces readable output', () => {
+        const stats = emptyUsageStats();
+        stats.initKeys['sessionId'] = { lastSeen: '2026-04-15', count: 5 };
+        stats.responsePartKinds['thinking'] = { lastSeen: '2026-04-14', count: 3 };
+        const output = formatUsageStats(stats);
+        assert.ok(output.includes('sessionId'));
+        assert.ok(output.includes('lastSeen=2026-04-15'));
+        assert.ok(output.includes('count=5'));
+        assert.ok(output.includes('thinking'));
+    });
+
+    it('U-29e: formatUsageStats returns placeholder for empty stats', () => {
+        const output = formatUsageStats(emptyUsageStats());
+        assert.strictEqual(output, '(no stats)');
     });
 });
 
