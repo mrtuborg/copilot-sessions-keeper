@@ -139,6 +139,59 @@ export function diffFingerprints(
 }
 
 /**
+ * Return only the additions in `current` that are not present in `stored`.
+ * Removals are ignored because a single export run may not observe all
+ * possible keys (not every session exercises every field).
+ * Returns null if there are no additions.
+ */
+export function diffFingerprintsAdditionsOnly(
+    stored: SchemaFingerprint,
+    current: SchemaFingerprint
+): string | null {
+    const diffs: string[] = [];
+
+    const compare = (label: string, oldVal: (string | number)[], newVal: (string | number)[]) => {
+        const oldSet = new Set(oldVal.map(String));
+        const added = newVal.map(String).filter(x => !oldSet.has(x));
+        if (added.length > 0) { diffs.push(`${label}: added [${added.join(', ')}]`); }
+    };
+
+    compare('JSONL entry kinds', stored.jsonlKinds, current.jsonlKinds);
+    compare('Init object keys', stored.initKeys, current.initKeys);
+    compare('Request keys', stored.requestKeys, current.requestKeys);
+    compare('Response part kinds', stored.responsePartKinds, current.responsePartKinds);
+    compare('Legacy session keys', stored.legacySessionKeys, current.legacySessionKeys);
+    compare('Legacy request keys', stored.legacyRequestKeys, current.legacyRequestKeys);
+
+    return diffs.length > 0 ? diffs.join('\n') : null;
+}
+
+/**
+ * Merge two fingerprints into a monotonic union. Each array in the
+ * result contains the sorted union of entries from both inputs.
+ * This ensures the stored fingerprint only grows over time, so keys
+ * absent from a single partial run are never treated as removals.
+ */
+export function mergeFingerprints(
+    a: SchemaFingerprint,
+    b: SchemaFingerprint
+): SchemaFingerprint {
+    const mergeNumbers = (x: number[], y: number[]) =>
+        [...new Set([...x, ...y])].sort((m, n) => m - n);
+    const mergeStrings = (x: string[], y: string[]) =>
+        [...new Set([...x, ...y])].sort();
+
+    return {
+        jsonlKinds: mergeNumbers(a.jsonlKinds, b.jsonlKinds),
+        initKeys: mergeStrings(a.initKeys, b.initKeys),
+        requestKeys: mergeStrings(a.requestKeys, b.requestKeys),
+        responsePartKinds: mergeStrings(a.responsePartKinds, b.responsePartKinds),
+        legacySessionKeys: mergeStrings(a.legacySessionKeys, b.legacySessionKeys),
+        legacyRequestKeys: mergeStrings(a.legacyRequestKeys, b.legacyRequestKeys),
+    };
+}
+
+/**
  * Export all Copilot chat sessions to dated folders.
  * Returns the count and an observed schema fingerprint.
  *
@@ -332,8 +385,18 @@ export function extractTurn(req: any): Turn | null {
             if (toolMsg) {
                 assistantText += `\n> ${toolMsg}\n`;
             }
+        } else if (rpKind === 'elicitationSerialized') {
+            const message = rp.message?.value ?? rp.message ?? '';
+            if (typeof message === 'string' && message.length > 0) {
+                assistantText += `\n> ${message}\n`;
+            }
+        } else if (rpKind === 'codeblockUri') {
+            const uri = rp.uri?.path ?? rp.uri ?? '';
+            if (typeof uri === 'string' && uri.length > 0) {
+                assistantText += `\`${path.basename(uri)}\``;
+            }
         }
-        // Skip mcpServersStarting, progressMessage, etc.
+        // Skip mcpServersStarting, questionCarousel, undoStop, etc.
     }
 
     const timestamp: number = req.timestamp ?? 0;

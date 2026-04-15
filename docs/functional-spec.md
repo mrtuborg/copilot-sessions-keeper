@@ -54,8 +54,8 @@ The extension discovers sessions from two locations:
 | Source | Path | Format |
 |--------|------|--------|
 | Workspace sessions | `workspaceStorage/<id>/chatSessions/*.jsonl` | JSONL append-log |
-| Empty-window sessions | `globalStorage/emptyWindowChatSessions/*.json` | Legacy JSON |
 | Empty-window sessions | `globalStorage/emptyWindowChatSessions/*.jsonl` | JSONL append-log |
+| Empty-window sessions (legacy) | `globalStorage/emptyWindowChatSessions/*.json` | Legacy JSON (no longer generated; retained for backward compat) |
 
 ### FR-4: Session Parsing
 
@@ -96,12 +96,13 @@ Rules:
 On each export run, the extension:
 
 1. Collects a **SchemaFingerprint** — the set of all observed JSONL entry kinds, object keys, and response part kinds
-2. Compares against the stored fingerprint in `globalState`
+2. Merges the observed fingerprint into the stored one (monotonic union — keys only grow, never shrink)
 3. On first run: stores baseline silently
-4. On change: writes a diff report, shows a warning with three actions:
+4. On **additions only** (new keys/kinds never seen before): writes a diff report, shows a warning with two actions:
    - **Open Report** — Opens the diff file in the editor
-   - **Accept New Schema** — Updates the stored baseline
-   - **Dismiss** — Takes no action (will re-alert next run)
+   - **Dismiss** — Takes no action (the merged fingerprint is already stored)
+
+Removals are intentionally ignored: a single export run may only parse a subset of sessions, so not every possible key will appear every time. The stored fingerprint represents the union of all keys ever observed.
 
 ### FR-7: Configuration
 

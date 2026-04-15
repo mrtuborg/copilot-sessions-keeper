@@ -12,6 +12,8 @@ import {
     formatMarkdown,
     fingerprintToString,
     diffFingerprints,
+    diffFingerprintsAdditionsOnly,
+    mergeFingerprints,
     getVscodeStoragePath,
     pruneOldBackups,
     _resetSchemaObserver,
@@ -209,6 +211,32 @@ describe('extractTurn', () => {
         // Should not crash; futureKind is just skipped
     });
 
+    it('U-17b: elicitationSerialized extracts message', () => {
+        _resetSchemaObserver();
+        const turn = extractTurn({
+            message: { parts: [{ text: 'q' }] },
+            response: [{
+                kind: 'elicitationSerialized',
+                message: { value: 'Which option do you prefer?' },
+            }],
+        });
+        assert.ok(turn);
+        assert.ok(turn.assistant.includes('Which option do you prefer?'));
+    });
+
+    it('U-17c: codeblockUri extracts filename', () => {
+        _resetSchemaObserver();
+        const turn = extractTurn({
+            message: { parts: [{ text: 'q' }] },
+            response: [{
+                kind: 'codeblockUri',
+                uri: { path: '/src/components/App.tsx' },
+            }],
+        });
+        assert.ok(turn);
+        assert.ok(turn.assistant.includes('`App.tsx`'));
+    });
+
     it('U-18: empty response', () => {
         const turn = extractTurn({
             message: { parts: [{ text: 'q' }] },
@@ -300,6 +328,65 @@ describe('Schema Fingerprinting', () => {
             responsePartKinds: [], legacySessionKeys: [], legacyRequestKeys: [],
         };
         assert.strictEqual(diffFingerprints(fp, fp), null);
+    });
+
+    it('U-27: diffFingerprintsAdditionsOnly ignores removals', () => {
+        const stored: SchemaFingerprint = {
+            jsonlKinds: [0, 1, 2], initKeys: ['a', 'b', 'c'], requestKeys: ['x'],
+            responsePartKinds: ['thinking'], legacySessionKeys: ['s1'], legacyRequestKeys: ['r1'],
+        };
+        const current: SchemaFingerprint = {
+            jsonlKinds: [0, 1], initKeys: ['a', 'b'], requestKeys: [],
+            responsePartKinds: [], legacySessionKeys: [], legacyRequestKeys: [],
+        };
+        // All differences are removals — should return null
+        assert.strictEqual(diffFingerprintsAdditionsOnly(stored, current), null);
+    });
+
+    it('U-27b: diffFingerprintsAdditionsOnly reports only additions', () => {
+        const stored: SchemaFingerprint = {
+            jsonlKinds: [0, 1], initKeys: ['alpha', 'beta'], requestKeys: [],
+            responsePartKinds: [], legacySessionKeys: [], legacyRequestKeys: [],
+        };
+        const current: SchemaFingerprint = {
+            jsonlKinds: [0, 1, 2], initKeys: ['alpha', 'gamma'], requestKeys: [],
+            responsePartKinds: [], legacySessionKeys: [], legacyRequestKeys: [],
+        };
+        const diff = diffFingerprintsAdditionsOnly(stored, current);
+        assert.ok(diff);
+        assert.ok(diff.includes('added'));
+        assert.ok(diff.includes('2'));
+        assert.ok(diff.includes('gamma'));
+        // 'beta' was removed in current but should NOT appear in diff
+        assert.ok(!diff.includes('removed'));
+        assert.ok(!diff.includes('beta'));
+    });
+
+    it('U-28: mergeFingerprints produces sorted union', () => {
+        const a: SchemaFingerprint = {
+            jsonlKinds: [0, 1], initKeys: ['a', 'c'], requestKeys: ['x'],
+            responsePartKinds: ['thinking'], legacySessionKeys: ['s1'], legacyRequestKeys: ['r1'],
+        };
+        const b: SchemaFingerprint = {
+            jsonlKinds: [1, 2], initKeys: ['b', 'c'], requestKeys: ['y'],
+            responsePartKinds: ['textEditGroup'], legacySessionKeys: [], legacyRequestKeys: [],
+        };
+        const merged = mergeFingerprints(a, b);
+        assert.deepStrictEqual(merged.jsonlKinds, [0, 1, 2]);
+        assert.deepStrictEqual(merged.initKeys, ['a', 'b', 'c']);
+        assert.deepStrictEqual(merged.requestKeys, ['x', 'y']);
+        assert.deepStrictEqual(merged.responsePartKinds, ['textEditGroup', 'thinking']);
+        assert.deepStrictEqual(merged.legacySessionKeys, ['s1']);
+        assert.deepStrictEqual(merged.legacyRequestKeys, ['r1']);
+    });
+
+    it('U-28b: mergeFingerprints is idempotent', () => {
+        const fp: SchemaFingerprint = {
+            jsonlKinds: [0, 1, 2], initKeys: ['a', 'b'], requestKeys: ['c'],
+            responsePartKinds: ['d'], legacySessionKeys: [], legacyRequestKeys: [],
+        };
+        const merged = mergeFingerprints(fp, fp);
+        assert.deepStrictEqual(merged, fp);
     });
 });
 

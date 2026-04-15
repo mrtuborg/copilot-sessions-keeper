@@ -3,6 +3,8 @@ import {
     exportAllSessions,
     fingerprintToString,
     diffFingerprints,
+    diffFingerprintsAdditionsOnly,
+    mergeFingerprints,
     pruneOldBackups,
     type SchemaFingerprint,
     type ExportResult,
@@ -98,6 +100,11 @@ async function runBackup(context: vscode.ExtensionContext, backupDir: string, tr
  * Compare the observed schema fingerprint against the stored one.
  * On first run, store it silently. On change, warn the user and
  * write a diff report to the backup directory.
+ *
+ * The stored fingerprint is a monotonic union across all runs.
+ * Only genuinely new keys/kinds trigger an alert — keys absent
+ * from a single run are not treated as removals (a partial run
+ * may not observe every possible field).
  */
 async function checkSchemaChange(
     context: vscode.ExtensionContext,
@@ -105,7 +112,6 @@ async function checkSchemaChange(
     backupDir: string
 ): Promise<void> {
     const stored = context.globalState.get<SchemaFingerprint>(SCHEMA_STATE_KEY);
-    const currentStr = fingerprintToString(current);
 
     if (!stored) {
         // First run — save baseline
@@ -114,15 +120,19 @@ async function checkSchemaChange(
         return;
     }
 
-    const storedStr = fingerprintToString(stored);
-    if (storedStr === currentStr) {
-        return; // No change
+    // Only additions matter — removals could just be a partial observation
+    const additions = diffFingerprintsAdditionsOnly(stored, current);
+
+    // Always merge current observations into the stored baseline so it
+    // grows monotonically (keys seen once are remembered forever).
+    const merged = mergeFingerprints(stored, current);
+    await context.globalState.update(SCHEMA_STATE_KEY, merged);
+
+    if (!additions) {
+        return; // No new keys/kinds
     }
 
-    // Schema changed — build a diff report
-    const diff = diffFingerprints(stored, current);
-    if (!diff) { return; }
-
+    // Schema expanded — build a diff report
     const reportPath = path.join(backupDir, `schema-change-${new Date().toISOString().slice(0, 10)}.txt`);
     const report = [
         'Copilot Sessions Keeper — Data Model Change Detected',
@@ -134,35 +144,35 @@ async function checkSchemaChange(
         'The backup extension may need updating to handle new fields',
         'or format changes. Review the changes below:',
         '',
-        '=== CHANGES ===',
-        diff,
+        '=== NEW KEYS/KINDS ===',
+        additions,
+        '',
+        '=== FULL DIFF (including removals from this run, possibly just partial observation) ===',
+        diffFingerprints(stored, current) ?? '(none)',
         '',
         '=== PREVIOUS FINGERPRINT ===',
         JSON.stringify(stored, null, 2),
         '',
-        '=== CURRENT FINGERPRINT ===',
+        '=== CURRENT FINGERPRINT (this run) ===',
         JSON.stringify(current, null, 2),
+        '',
+        '=== MERGED FINGERPRINT (stored) ===',
+        JSON.stringify(merged, null, 2),
     ].join('\n');
 
     const fs = await import('fs');
     fs.writeFileSync(reportPath, report, 'utf-8');
 
     const action = await vscode.window.showWarningMessage(
-        'Copilot Sessions Keeper: Chat data model has changed! ' +
+        'Copilot Sessions Keeper: New keys detected in chat data model! ' +
         'The backup parser may need updating. See the report for details.',
         'Open Report',
-        'Accept New Schema',
         'Dismiss'
     );
 
     if (action === 'Open Report') {
         const doc = await vscode.workspace.openTextDocument(reportPath);
         await vscode.window.showTextDocument(doc);
-    }
-
-    if (action === 'Accept New Schema') {
-        await context.globalState.update(SCHEMA_STATE_KEY, current);
-        vscode.window.showInformationMessage('Schema fingerprint updated.');
     }
 }
 

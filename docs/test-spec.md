@@ -83,6 +83,10 @@ src/test/fixtures/
 | U-24 | diffFingerprints detects added keys | Old: `[a,b]`, New: `[a,b,c]` | Diff reports `added [c]` |
 | U-25 | diffFingerprints detects removed keys | Old: `[a,b,c]`, New: `[a,b]` | Diff reports `removed [c]` |
 | U-26 | diffFingerprints returns null on match | Same fingerprints | Returns `null` |
+| U-27 | diffFingerprintsAdditionsOnly ignores removals | Stored has extras, current is subset | Returns `null` |
+| U-27b | diffFingerprintsAdditionsOnly reports only additions | Current has new keys | Reports additions, not removals |
+| U-28 | mergeFingerprints produces sorted union | Two overlapping fingerprints | Union of all keys, sorted |
+| U-28b | mergeFingerprints is idempotent | Same fingerprint merged with itself | Identical output |
 
 ### 2.5 Output Formatting
 
