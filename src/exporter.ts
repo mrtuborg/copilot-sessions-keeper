@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { execSync } from 'child_process';
 
 /** A single request–response turn in a session. */
 export interface Turn {
@@ -16,6 +17,7 @@ export interface Session {
     title: string;
     creationDate: number;
     workspace: string;
+    gitRemote?: string;
     turns: Turn[];
 }
 
@@ -334,12 +336,17 @@ export async function exportAllSessions(backupDir: string, storageRoot?: string,
             if (!fs.existsSync(chatDir)) { continue; }
 
             const workspace = readWorkspaceName(wsDir);
+            const gitRemote = resolveGitRemote(workspace);
 
             for (const file of fs.readdirSync(chatDir)) {
                 if (!file.endsWith('.jsonl')) { continue; }
                 try {
                     const filePath = path.join(chatDir, file);
-                    processFile(filePath, () => parseJsonl(filePath, workspace));
+                    processFile(filePath, () => {
+                        const session = parseJsonl(filePath, workspace);
+                        if (session && gitRemote) { session.gitRemote = gitRemote; }
+                        return session;
+                    });
                 } catch (e) {
                     console.warn(`[copilot-sessions-keeper] skipped ${file}: ${e}`);
                 }
@@ -552,7 +559,7 @@ export function writeSession(session: Session, backupDir: string, options?: Writ
         // Fallback: check MD header when JSON is absent or corrupt
         if (!identified && fs.existsSync(mdPath)) {
             const mdHead = fs.readFileSync(mdPath, 'utf-8').slice(0, 1024);
-            if (mdHead.includes(`**Session ID:** ${session.sessionId}`)) {
+            if (mdHead.includes(`session_id: "${session.sessionId}"`)) {
                 return false; // Same session — idempotent skip
             }
         }
@@ -593,13 +600,19 @@ export function writeSession(session: Session, backupDir: string, options?: Writ
 
 export function formatMarkdown(session: Session): string {
     const lines: string[] = [];
-    lines.push(`# ${session.title || '(untitled)'}`);
-    lines.push('');
-    lines.push(`**Workspace:** ${session.workspace}`);
-    lines.push(`**Date:** ${session.creationDate ? new Date(session.creationDate).toISOString() : 'unknown'}`);
-    lines.push(`**Session ID:** ${session.sessionId}`);
-    lines.push('');
+
+    // YAML frontmatter for Obsidian
     lines.push('---');
+    lines.push(`title: "${yamlEscape(session.title || '(untitled)')}"`);
+    lines.push(`session_id: "${session.sessionId}"`);
+    lines.push(`date: ${session.creationDate ? new Date(session.creationDate).toISOString() : 'unknown'}`);
+    lines.push(`workspace: "${yamlEscape(session.workspace)}"`);
+    if (session.gitRemote) {
+        lines.push(`git_remote: "${session.gitRemote}"`);
+    }
+    lines.push('---');
+    lines.push('');
+    lines.push(`# ${session.title || '(untitled)'}`);
     lines.push('');
 
     for (const turn of session.turns) {
@@ -651,6 +664,16 @@ export function slugify(text: string): string {
         .slice(0, 80);
 }
 
+/** Escape a string for use inside a YAML double-quoted value. */
+export function yamlEscape(text: string): string {
+    return text
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"')
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r')
+        .replace(/\t/g, '\\t');
+}
+
 export function readWorkspaceName(wsDir: string): string {
     try {
         const wsJson = JSON.parse(fs.readFileSync(path.join(wsDir, 'workspace.json'), 'utf-8'));
@@ -659,6 +682,46 @@ export function readWorkspaceName(wsDir: string): string {
     } catch {
         return path.basename(wsDir);
     }
+}
+
+/**
+ * Attempt to resolve the git remote URL for a workspace folder.
+ * Returns a normalized HTTPS URL, or undefined if not a git repo.
+ * Results are cached for the lifetime of the process.
+ */
+const _gitRemoteCache = new Map<string, string | undefined>();
+
+export function resolveGitRemote(workspacePath: string): string | undefined {
+    if (_gitRemoteCache.has(workspacePath)) {
+        return _gitRemoteCache.get(workspacePath);
+    }
+    let result: string | undefined;
+    try {
+        if (fs.existsSync(workspacePath)) {
+            const raw = execSync('git remote get-url origin', {
+                cwd: workspacePath,
+                encoding: 'utf-8',
+                timeout: 3000,
+                stdio: ['ignore', 'pipe', 'ignore'],
+            }).trim();
+            result = normalizeGitUrl(raw);
+        }
+    } catch {
+        // not a git repo or no origin remote
+    }
+    _gitRemoteCache.set(workspacePath, result);
+    return result;
+}
+
+/** Convert SSH or git:// remote URLs to HTTPS form. */
+export function normalizeGitUrl(url: string): string {
+    // git@github.com:user/repo.git → https://github.com/user/repo
+    const sshMatch = url.match(/^git@([^:]+):(.+?)(\.git)?$/);
+    if (sshMatch) {
+        return `https://${sshMatch[1]}/${sshMatch[2]}`;
+    }
+    // Strip trailing .git from https URLs
+    return url.replace(/\.git$/, '');
 }
 
 const MTIME_FILE = '_metadata.json';

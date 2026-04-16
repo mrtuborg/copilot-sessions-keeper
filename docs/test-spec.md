@@ -69,7 +69,8 @@ src/test/fixtures/
 | U-14 | Code edit placeholder | Response with `kind: "textEditGroup"` | `turn.assistant` contains `[code edit]` |
 | U-15 | Tool invocation summary | Response with `kind: "toolInvocationSerialized"` | `turn.assistant` contains past-tense message |
 | U-16 | Inline reference | Response with `kind: "inlineReference"` | `turn.assistant` contains backticked filename |
-| U-17 | Unknown kind ignored | Response with `kind: "futureKind"` | No crash, kind observed by SchemaObserver |
+| U-17b | elicitationSerialized extracts message | Response with `kind: "elicitationSerialized"` | `turn.assistant` contains message |
+| U-17c | codeblockUri extracts filename | Response with `kind: "codeblockUri"` | `turn.assistant` contains backticked basename |
 | U-18 | Empty response | `response: []` | `turn.assistant === ""` |
 
 ### 2.4 Schema Fingerprinting
@@ -87,6 +88,11 @@ src/test/fixtures/
 | U-27b | diffFingerprintsAdditionsOnly reports only additions | Current has new keys | Reports additions, not removals |
 | U-28 | mergeFingerprints produces sorted union | Two overlapping fingerprints | Union of all keys, sorted |
 | U-28b | mergeFingerprints is idempotent | Same fingerprint merged with itself | Identical output |
+| U-29 | updateUsageStats bumps count and lastSeen | Observed fingerprint + today's date | count incremented, lastSeen updated |
+| U-29b | updateUsageStats increments on subsequent runs | Two runs | count = 2 |
+| U-29c | updateUsageStats preserves unobserved keys | Key not in current run | Historical stats unchanged |
+| U-29d | formatUsageStats produces readable output | Stats with entries | Multi-line formatted string |
+| U-29e | formatUsageStats handles empty stats | Empty stats | Returns placeholder |
 
 ### 2.5 Output Formatting
 
@@ -96,7 +102,7 @@ src/test/fixtures/
 | U-31 | Slug truncation | Title > 80 chars | Slug truncated to 80 chars |
 | U-32 | Slug sanitization | Title with `special!@#chars` | Only lowercase alphanumeric and hyphens |
 | U-33 | Undated session | `creationDate = 0` | Folder: `undated` |
-| U-34 | Markdown structure | Session with 2 turns | H1 title, metadata block, 2 User/Assistant sections |
+| U-34 | Markdown structure | Session with 2 turns | YAML frontmatter with session_id, workspace, date; H1 title; 2 User/Assistant sections |
 | U-35 | JSON structure | Parsed session | Valid JSON matching `Session` interface |
 
 ### 2.6 Helpers
@@ -109,6 +115,27 @@ src/test/fixtures/
 | U-43 | readWorkspaceName fallback | Missing workspace.json | Returns directory basename |
 | U-44 | getVscodeStoragePath platform path | Current platform | Path ends with platform-appropriate suffix |
 | U-45 | getVscodeStoragePath includes homedir | Current platform | Path starts with homedir or APPDATA |
+
+### 2.7 Git Remote Resolution
+
+| ID | Test Case | Input | Expected |
+|----|-----------|-------|----------|
+| U-50 | normalizeGitUrl SSH format | `git@github.com:user/repo.git` | `https://github.com/user/repo` |
+| U-51 | normalizeGitUrl HTTPS with .git | `https://github.com/user/repo.git` | `https://github.com/user/repo` |
+| U-52 | normalizeGitUrl plain HTTPS | `https://github.com/user/repo` | unchanged |
+| U-53 | resolveGitRemote non-existent path | non-existent dir | `undefined` |
+| U-54 | resolveGitRemote non-git dir | temp dir with no .git | `undefined` |
+| U-55 | resolveGitRemote caches results | same path called twice | `execSync` called only once |
+
+### 2.8 YAML Escaping
+
+| ID | Test Case | Input | Expected |
+|----|-----------|-------|----------|
+| U-60 | yamlEscape quotes | `He said "hello"` | `He said \"hello\"` |
+| U-61 | yamlEscape backslash | `C:\Users\test` | `C:\\Users\\test` |
+| U-62 | yamlEscape newline | `line1\nline2` | `line1\\nline2` |
+| U-63 | yamlEscape tabs | `col1\tcol2` | `col1\\tcol2` |
+| U-64 | yamlEscape combined | `"path\nto\tthing"` | All special chars escaped |
 
 ---
 
@@ -158,6 +185,8 @@ These require running in the VS Code Extension Development Host.
 | E-06 | Concurrent VS Code windows | Each window may trigger backup; idempotency prevents duplicates |
 | E-07 | Malformed JSON line in JSONL | Entire file skipped (`JSON.parse` throws, caught by caller). No partial session recovery |
 | E-08 | File name collision (same date + same slug) | Second session exported with `-<sessionId[:8]>` suffix. Idempotent on re-run. |
+| E-09 | Idempotency with JSON disabled | `outputJson: false`, run twice | Second run skips via MD frontmatter `session_id` match |
+| E-10 | Corrupt JSON with valid MD | JSON file corrupt, MD exists with matching session_id | Session correctly identified as same via MD fallback |
 
 ---
 

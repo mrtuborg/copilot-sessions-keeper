@@ -16,17 +16,19 @@ Preserve GitHub Copilot chat sessions that VS Code silently prunes (keeping only
 
 - Reading chat session data from VS Code's internal storage
 - Exporting to JSON and Markdown
+- Markdown output uses YAML frontmatter (Obsidian-compatible)
+- Git repository remote URL resolution per workspace
 - Automatic daily trigger on activation
 - Manual trigger via Command Palette
 - Schema change detection and user notification
 - Configurable backup directory
+- Optional JSON output (can be disabled to produce Markdown only)
 
 ### Out of Scope
 
 - Syncing backups to remote/cloud storage
 - Editing or replaying sessions
 - Backing up non-Copilot chat providers (e.g., Cline, Continue)
-- Export to Obsidian vault format
 
 ## 3. Functional Requirements
 
@@ -65,6 +67,7 @@ For each session the extension extracts:
 - **Title** — First string mutation in the JSONL log, or `customTitle` in legacy JSON
 - **Creation date** — Timestamp from initialization entry
 - **Workspace** — Resolved from `workspace.json` in the workspace storage directory
+- **Git Remote** — Resolved by running `git remote get-url origin` in the workspace folder; normalized to HTTPS URL. Cached per workspace path for the duration of the export run. Omitted if the folder is not a git repo or has no `origin` remote.
 - **Turns** — List of user/assistant exchange pairs
 
 Each turn contains:
@@ -79,16 +82,43 @@ Each session is written to:
 
 ```
 <backupDir>/YYYY-MM-DD/
-    <topic-slug>.json    # Full-fidelity structured JSON (Session interface)
-    <topic-slug>.md      # Human-readable Markdown with User/Assistant sections
+    <topic-slug>.json    # Full-fidelity structured JSON (optional, see outputJson setting)
+    <topic-slug>.md      # Obsidian-compatible Markdown with YAML frontmatter
 ```
 
-Rules:
+#### Markdown Format
+
+The Markdown file uses YAML frontmatter for Obsidian compatibility:
+
+```yaml
+---
+title: "Session Title"
+session_id: "uuid-here"
+date: 2026-04-16T10:30:00.000Z
+workspace: "/Users/vn/ws/my-project"
+git_remote: "https://github.com/user/my-project"   # only if resolved
+---
+```
+
+The body contains turn sections with:
+- Per-turn **timestamp** (italic ISO date)
+- **User** section
+- **Thinking** section (collapsible `<details>` block, only if present)
+- **Assistant** section
+
+YAML values are properly escaped (backslashes, quotes, newlines, tabs).
+
+#### JSON Format
+
+JSON output writes the full `Session` object with `JSON.stringify` (2-space indent). JSON output can be disabled via the `outputJson` setting.
+
+#### Rules
+
 - Folder name is the session creation date (`YYYY-MM-DD`), or `undated` if no creation date
 - Multiple sessions from the same date share one folder
 - `topic-slug` is the title lowercased, non-alphanumeric chars replaced with `-`, max 80 chars
-- If the `.json` file already exists with the same `sessionId`, the session is skipped (idempotent)
-- If the `.json` file exists with a different `sessionId` (collision), a `-<sessionId[:8]>` suffix is appended
+- Idempotency check: if a `.json` or `.md` file already exists, the session ID is compared (via JSON parse or frontmatter `session_id` match). Same session → skip. When JSON is absent or corrupt, the Markdown frontmatter is used as fallback.
+- If a different session has the same slug (collision), a `-<sessionId[:8]>` suffix is appended
 - Backup directory is created recursively if needed
 
 ### FR-6: Schema Change Detection
@@ -111,6 +141,7 @@ Removals are intentionally ignored: a single export run may only parse a subset 
 | `copilotSessionsKeeper.backupDir` | string | `""` (= `~/copilot-sessions-keeper`) | Output directory. Supports `~` prefix. |
 | `copilotSessionsKeeper.enabled` | boolean | `true` | Enable/disable automatic daily backup |
 | `copilotSessionsKeeper.retentionDays` | number | `0` | Auto-delete backup folders older than N days. 0 = keep forever. |
+| `copilotSessionsKeeper.outputJson` | boolean | `true` | Also write a JSON file for each session. When `false`, only Markdown is produced. |
 
 ### FR-8: Incremental Backup
 
@@ -191,5 +222,5 @@ flowchart LR
 ## 7. Future Considerations
 
 - Session merging when same session is updated across runs
-- Export to Obsidian vault format
 - Syncing backups to cloud storage
+- Obsidian tags / links derived from session content

@@ -521,9 +521,13 @@ describe('Output Formatting', () => {
             ],
         };
         const md = formatMarkdown(session);
-        assert.ok(md.startsWith('# Test MD'));
-        assert.ok(md.includes('**Workspace:** ws'));
-        assert.ok(md.includes('**Session ID:** md-test'));
+        // Frontmatter
+        assert.ok(md.startsWith('---\n'));
+        assert.ok(md.includes('session_id: "md-test"'));
+        assert.ok(md.includes('workspace: "ws"'));
+        assert.ok(md.includes('date: '));
+        // Body
+        assert.ok(md.includes('# Test MD'));
         assert.ok(md.includes('## User'));
         assert.ok(md.includes('## Assistant'));
         // 2 User + 2 Assistant sections
