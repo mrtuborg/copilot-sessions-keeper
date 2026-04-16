@@ -299,7 +299,7 @@ export function mergeFingerprints(
  * Tracks source file modification times in `_metadata.json` inside the
  * backup directory so unchanged files are skipped on subsequent runs.
  */
-export async function exportAllSessions(backupDir: string, storageRoot?: string): Promise<ExportResult> {
+export async function exportAllSessions(backupDir: string, storageRoot?: string, options?: WriteOptions): Promise<ExportResult> {
     fs.mkdirSync(backupDir, { recursive: true });
     _schemaObserver = new SchemaObserver();
     let count = 0;
@@ -319,7 +319,7 @@ export async function exportAllSessions(backupDir: string, storageRoot?: string)
 
         const session = parse();
         if (session && session.turns.length > 0) {
-            if (writeSession(session, backupDir)) {
+            if (writeSession(session, backupDir, options)) {
                 count++;
             }
         }
@@ -514,7 +514,12 @@ export function extractTurn(req: any): Turn | null {
 /*  Write session to disk                                             */
 /* ------------------------------------------------------------------ */
 
-export function writeSession(session: Session, backupDir: string): boolean {
+export interface WriteOptions {
+    /** When false, skip writing the JSON file. Defaults to true. */
+    outputJson?: boolean;
+}
+
+export function writeSession(session: Session, backupDir: string, options?: WriteOptions): boolean {
     const dateStr = session.creationDate
         ? new Date(session.creationDate).toISOString().slice(0, 10)
         : 'undated';
@@ -528,31 +533,49 @@ export function writeSession(session: Session, backupDir: string): boolean {
     // (collision → append a short session-id suffix).
     let slug = baseSlug;
     const jsonPath = path.join(outDir, `${slug}.json`);
+    const mdPath = path.join(outDir, `${slug}.md`);
 
-    if (fs.existsSync(jsonPath)) {
-        try {
-            const existing = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
-            if (existing.sessionId === session.sessionId) {
+    if (fs.existsSync(jsonPath) || fs.existsSync(mdPath)) {
+        let identified = false;
+
+        // Try to identify the existing session via the JSON file
+        if (fs.existsSync(jsonPath)) {
+            try {
+                const existing = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+                if (existing.sessionId === session.sessionId) {
+                    return false; // Same session — idempotent skip
+                }
+                identified = true; // JSON parsed — belongs to a different session
+            } catch { /* corrupt file — fall through to MD check */ }
+        }
+
+        // Fallback: check MD header when JSON is absent or corrupt
+        if (!identified && fs.existsSync(mdPath)) {
+            const mdHead = fs.readFileSync(mdPath, 'utf-8').slice(0, 1024);
+            if (mdHead.includes(`**Session ID:** ${session.sessionId}`)) {
                 return false; // Same session — idempotent skip
             }
-        } catch { /* corrupt file — treat as collision */ }
+        }
 
         // Different session with the same slug — append session ID suffix
         const suffix = session.sessionId.slice(0, 8);
         slug = `${baseSlug}-${suffix}`;
 
         const altJsonPath = path.join(outDir, `${slug}.json`);
-        if (fs.existsSync(altJsonPath)) {
+        const altMdPath = path.join(outDir, `${slug}.md`);
+        if (fs.existsSync(altJsonPath) || fs.existsSync(altMdPath)) {
             return false; // Already exported with suffixed name
         }
     }
 
-    // JSON – full fidelity
-    fs.writeFileSync(
-        path.join(outDir, `${slug}.json`),
-        JSON.stringify(session, null, 2),
-        'utf-8'
-    );
+    // JSON – full fidelity (optional)
+    if (options?.outputJson !== false) {
+        fs.writeFileSync(
+            path.join(outDir, `${slug}.json`),
+            JSON.stringify(session, null, 2),
+            'utf-8'
+        );
+    }
 
     // Markdown – human readable
     fs.writeFileSync(
@@ -580,10 +603,25 @@ export function formatMarkdown(session: Session): string {
     lines.push('');
 
     for (const turn of session.turns) {
+        if (turn.timestamp) {
+            lines.push(`*${new Date(turn.timestamp).toISOString()}*`);
+            lines.push('');
+        }
+
         if (turn.user) {
             lines.push('## User');
             lines.push('');
             lines.push(turn.user);
+            lines.push('');
+        }
+
+        if (turn.thinking) {
+            lines.push('<details>');
+            lines.push('<summary>Thinking</summary>');
+            lines.push('');
+            lines.push(turn.thinking);
+            lines.push('');
+            lines.push('</details>');
             lines.push('');
         }
 

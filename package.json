@@ -44,6 +44,11 @@
           "default": 0,
           "minimum": 0,
           "description": "Auto-delete backups older than this many days. 0 = keep forever"
+        },
+        "copilotSessionsKeeper.outputJson": {
+          "type": "boolean",
+          "default": true,
+          "description": "Also write a JSON file for each session (in addition to Markdown)"
         }
       }
     }

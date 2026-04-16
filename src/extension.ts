@@ -12,6 +12,7 @@ import {
     type SchemaFingerprint,
     type SchemaUsageStats,
     type ExportResult,
+    type WriteOptions,
 } from './exporter';
 import * as path from 'path';
 import * as os from 'os';
@@ -70,7 +71,9 @@ function getBackupDir(): string {
 
 async function runBackup(context: vscode.ExtensionContext, backupDir: string, trigger: string): Promise<number> {
     try {
-        const result: ExportResult = await exportAllSessions(backupDir);
+        const outputJson = vscode.workspace.getConfiguration('copilotSessionsKeeper')
+            .get<boolean>('outputJson', true);
+        const result: ExportResult = await exportAllSessions(backupDir, undefined, { outputJson });
         console.log(`[copilot-sessions-keeper] ${trigger}: exported ${result.count} sessions, skipped ${result.skippedUnchanged} unchanged`);
 
         // Schema change detection — only when files were actually parsed
