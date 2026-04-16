@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import {
     exportAllSessions,
-    fingerprintToString,
     diffFingerprints,
     diffFingerprintsAdditionsOnly,
     mergeFingerprints,
@@ -12,7 +11,6 @@ import {
     type SchemaFingerprint,
     type SchemaUsageStats,
     type ExportResult,
-    type WriteOptions,
 } from './exporter';
 import * as path from 'path';
 import * as os from 'os';
@@ -20,9 +18,58 @@ import * as os from 'os';
 const SCHEMA_STATE_KEY = 'knownSchemaFingerprint';
 const SCHEMA_USAGE_KEY = 'schemaUsageStats';
 
+let statusBarItem: vscode.StatusBarItem;
+let idleResetTimer: ReturnType<typeof setTimeout> | undefined;
+
+function setStatus(state: 'idle' | 'syncing' | 'done' | 'error' | 'disabled', detail?: string) {
+    if (!statusBarItem) { return; }
+    if (idleResetTimer) { clearTimeout(idleResetTimer); idleResetTimer = undefined; }
+    switch (state) {
+        case 'idle':
+            statusBarItem.text = '$(check) Keeper';
+            statusBarItem.tooltip = detail ?? 'Copilot Sessions Keeper: ready';
+            statusBarItem.backgroundColor = undefined;
+            break;
+        case 'syncing':
+            statusBarItem.text = '$(sync~spin) Keeper';
+            statusBarItem.tooltip = detail ?? 'Copilot Sessions Keeper: backing up…';
+            statusBarItem.backgroundColor = undefined;
+            break;
+        case 'done':
+            statusBarItem.text = '$(pass-filled) Keeper';
+            statusBarItem.tooltip = detail ?? 'Copilot Sessions Keeper: backup complete';
+            statusBarItem.backgroundColor = undefined;
+            // Revert to idle after 5 seconds, keeping the detail as tooltip
+            idleResetTimer = setTimeout(() => setStatus('idle', detail), 5000);
+            break;
+        case 'error':
+            statusBarItem.text = '$(error) Keeper';
+            statusBarItem.tooltip = detail ?? 'Copilot Sessions Keeper: backup failed';
+            statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+            break;
+        case 'disabled':
+            statusBarItem.text = '$(circle-slash) Keeper';
+            statusBarItem.tooltip = 'Copilot Sessions Keeper: disabled';
+            statusBarItem.backgroundColor = undefined;
+            break;
+    }
+}
+
 export function activate(context: vscode.ExtensionContext) {
     const config = vscode.workspace.getConfiguration('copilotSessionsKeeper');
     const enabled = config.get<boolean>('enabled', true);
+
+    // Status bar item
+    statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
+    statusBarItem.command = 'copilotSessionsKeeper.backupNow';
+    context.subscriptions.push(statusBarItem);
+    statusBarItem.show();
+
+    if (!enabled) {
+        setStatus('disabled');
+    } else {
+        setStatus('idle');
+    }
 
     // Register manual command
     context.subscriptions.push(
@@ -70,11 +117,17 @@ function getBackupDir(): string {
 }
 
 async function runBackup(context: vscode.ExtensionContext, backupDir: string, trigger: string): Promise<number> {
+    setStatus('syncing', `Copilot Sessions Keeper: ${trigger} backup in progress…`);
+    // Yield to the event loop so VS Code renders the spinner before
+    // the synchronous file I/O in exportAllSessions blocks the thread.
+    await new Promise(resolve => setTimeout(resolve, 0));
     try {
-        const outputJson = vscode.workspace.getConfiguration('copilotSessionsKeeper')
-            .get<boolean>('outputJson', true);
-        const result: ExportResult = await exportAllSessions(backupDir, undefined, { outputJson });
+        const cfg = vscode.workspace.getConfiguration('copilotSessionsKeeper');
+        const outputJson = cfg.get<boolean>('outputJson', true);
+        const workspacePrefix = cfg.get<string>('workspacePrefix', '');
+        const result: ExportResult = await exportAllSessions(backupDir, undefined, { outputJson, workspacePrefix });
         console.log(`[copilot-sessions-keeper] ${trigger}: exported ${result.count} sessions, skipped ${result.skippedUnchanged} unchanged`);
+        setStatus('done', `Copilot Sessions Keeper: exported ${result.count}, skipped ${result.skippedUnchanged} unchanged`);
 
         // Schema change detection — only when files were actually parsed
         // (if all files were skipped via mtime, the fingerprint is empty
@@ -99,6 +152,7 @@ async function runBackup(context: vscode.ExtensionContext, backupDir: string, tr
     } catch (err: any) {
         const msg = err?.message ?? String(err);
         console.error(`[copilot-sessions-keeper] ${trigger} backup failed:`, msg);
+        setStatus('error', `Copilot Sessions Keeper: ${msg}`);
         vscode.window.showErrorMessage(`Copilot Sessions Keeper failed: ${msg}`);
         return 0;
     }
@@ -193,4 +247,6 @@ async function checkSchemaChange(
     }
 }
 
-export function deactivate() {}
+export function deactivate() {
+    if (idleResetTimer) { clearTimeout(idleResetTimer); idleResetTimer = undefined; }
+}

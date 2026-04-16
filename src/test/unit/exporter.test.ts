@@ -8,6 +8,7 @@ import {
     extractTurn,
     slugify,
     readWorkspaceName,
+    workspaceToWikiLink,
     writeSession,
     formatMarkdown,
     fingerprintToString,
@@ -524,7 +525,7 @@ describe('Output Formatting', () => {
         // Frontmatter
         assert.ok(md.startsWith('---\n'));
         assert.ok(md.includes('session_id: "md-test"'));
-        assert.ok(md.includes('workspace: "ws"'));
+        assert.ok(md.includes('workspace: "[[ws]]"'));
         assert.ok(md.includes('date: '));
         // Body
         assert.ok(md.includes('# Test MD'));
@@ -570,6 +571,26 @@ describe('Helpers', () => {
 
     it('U-41: slugify special chars', () => {
         assert.strictEqual(slugify('git reset --hard & push'), 'git-reset-hard-push');
+    });
+
+    it('U-46: workspaceToWikiLink strips leading slash and replaces slashes with hyphens', () => {
+        assert.strictEqual(workspaceToWikiLink('/Users/vn/ws/my-project'), 'Users-vn-ws-my-project');
+    });
+
+    it('U-47: workspaceToWikiLink handles no-slash input', () => {
+        assert.strictEqual(workspaceToWikiLink('ws'), 'ws');
+    });
+
+    it('U-48: workspaceToWikiLink handles Windows-style path with forward slashes', () => {
+        assert.strictEqual(workspaceToWikiLink('C:/Users/vn/project'), 'C:-Users-vn-project');
+    });
+
+    it('U-49: workspaceToWikiLink with prefix', () => {
+        assert.strictEqual(workspaceToWikiLink('/Users/vn/ws/foo', 'projects/'), 'projects/Users-vn-ws-foo');
+    });
+
+    it('U-50: workspaceToWikiLink with empty prefix', () => {
+        assert.strictEqual(workspaceToWikiLink('/Users/vn/ws/foo', ''), 'Users-vn-ws-foo');
     });
 
     it('U-42: readWorkspaceName from workspace.json', () => {

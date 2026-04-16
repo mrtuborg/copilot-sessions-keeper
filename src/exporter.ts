@@ -524,6 +524,8 @@ export function extractTurn(req: any): Turn | null {
 export interface WriteOptions {
     /** When false, skip writing the JSON file. Defaults to true. */
     outputJson?: boolean;
+    /** Prefix prepended to the workspace wiki-link in Markdown frontmatter. */
+    workspacePrefix?: string;
 }
 
 export function writeSession(session: Session, backupDir: string, options?: WriteOptions): boolean {
@@ -587,7 +589,7 @@ export function writeSession(session: Session, backupDir: string, options?: Writ
     // Markdown – human readable
     fs.writeFileSync(
         path.join(outDir, `${slug}.md`),
-        formatMarkdown(session),
+        formatMarkdown(session, options),
         'utf-8'
     );
 
@@ -598,7 +600,7 @@ export function writeSession(session: Session, backupDir: string, options?: Writ
 /*  Markdown formatter                                                */
 /* ------------------------------------------------------------------ */
 
-export function formatMarkdown(session: Session): string {
+export function formatMarkdown(session: Session, options?: WriteOptions): string {
     const lines: string[] = [];
 
     // YAML frontmatter for Obsidian
@@ -606,7 +608,7 @@ export function formatMarkdown(session: Session): string {
     lines.push(`title: "${yamlEscape(session.title || '(untitled)')}"`);
     lines.push(`session_id: "${session.sessionId}"`);
     lines.push(`date: ${session.creationDate ? new Date(session.creationDate).toISOString() : 'unknown'}`);
-    lines.push(`workspace: "${yamlEscape(session.workspace)}"`);
+    lines.push(`workspace: "[[${workspaceToWikiLink(session.workspace, options?.workspacePrefix)}]]"`);
     if (session.gitRemote) {
         lines.push(`git_remote: "${session.gitRemote}"`);
     }
@@ -672,6 +674,16 @@ export function yamlEscape(text: string): string {
         .replace(/\n/g, '\\n')
         .replace(/\r/g, '\\r')
         .replace(/\t/g, '\\t');
+}
+
+/**
+ * Convert a workspace path to an Obsidian wiki-link target.
+ * Strips the leading slash and replaces remaining slashes with hyphens.
+ * e.g. "/Users/vn/ws/my-project" → "Users-vn-ws-my-project"
+ */
+export function workspaceToWikiLink(workspace: string, prefix?: string): string {
+    const slug = workspace.replace(/^\//, '').replace(/\//g, '-');
+    return prefix ? prefix + slug : slug;
 }
 
 export function readWorkspaceName(wsDir: string): string {

@@ -49,6 +49,11 @@
           "type": "boolean",
           "default": true,
           "description": "Also write a JSON file for each session (in addition to Markdown)"
+        },
+        "copilotSessionsKeeper.workspacePrefix": {
+          "type": "string",
+          "default": "",
+          "description": "Prefix prepended to workspace wiki-links in Markdown frontmatter. e.g. 'projects/' produces [[projects/Users-vn-ws-foo]]"
         }
       }
     }
