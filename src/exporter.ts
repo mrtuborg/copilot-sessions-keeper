@@ -608,7 +608,10 @@ export function formatMarkdown(session: Session, options?: WriteOptions): string
     lines.push(`title: "${yamlEscape(session.title || '(untitled)')}"`);
     lines.push(`session_id: "${session.sessionId}"`);
     lines.push(`date: ${session.creationDate ? new Date(session.creationDate).toISOString() : 'unknown'}`);
-    lines.push(`workspace: "[[${workspaceToWikiLink(session.workspace, options?.workspacePrefix)}]]"`);
+    const wikiTarget = session.gitRemote
+        ? gitRemoteToWikiLink(session.gitRemote, options?.workspacePrefix)
+        : workspaceToWikiLink(session.workspace, options?.workspacePrefix);
+    lines.push(`workspace: "[[${wikiTarget}]]"`);
     if (session.gitRemote) {
         lines.push(`git_remote: "${session.gitRemote}"`);
     }
@@ -683,6 +686,16 @@ export function yamlEscape(text: string): string {
  */
 export function workspaceToWikiLink(workspace: string, prefix?: string): string {
     const slug = workspace.replace(/^\//, '').replace(/\//g, '-');
+    return prefix ? prefix + slug : slug;
+}
+
+/**
+ * Convert a git remote HTTPS URL to an Obsidian wiki-link target.
+ * Strips the protocol and replaces slashes with hyphens.
+ * e.g. "https://github.com/user/repo" → "github.com-user-repo"
+ */
+export function gitRemoteToWikiLink(remoteUrl: string, prefix?: string): string {
+    const slug = remoteUrl.replace(/^https?:\/\//, '').replace(/\//g, '-');
     return prefix ? prefix + slug : slug;
 }
 

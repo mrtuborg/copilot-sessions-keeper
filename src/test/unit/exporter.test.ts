@@ -9,6 +9,7 @@ import {
     slugify,
     readWorkspaceName,
     workspaceToWikiLink,
+    gitRemoteToWikiLink,
     writeSession,
     formatMarkdown,
     fingerprintToString,
@@ -536,6 +537,22 @@ describe('Output Formatting', () => {
         assert.strictEqual((md.match(/## Assistant/g) || []).length, 2);
     });
 
+    it('U-34b: markdown uses git remote for wiki link when present', () => {
+        const session: Session = {
+            sessionId: 'md-git',
+            title: 'Git Remote Test',
+            creationDate: 1712966400000,
+            workspace: '/Users/vn/ws/my-project',
+            gitRemote: 'https://github.com/user/my-project',
+            turns: [
+                { user: 'q', assistant: 'a', thinking: '', timestamp: 0 },
+            ],
+        };
+        const md = formatMarkdown(session);
+        assert.ok(md.includes('workspace: "[[github.com-user-my-project]]"'));
+        assert.ok(!md.includes('Users-vn-ws-my-project'));
+    });
+
     it('U-35: JSON structure', () => {
         const session: Session = {
             sessionId: 'json-test',
@@ -591,6 +608,18 @@ describe('Helpers', () => {
 
     it('U-50: workspaceToWikiLink with empty prefix', () => {
         assert.strictEqual(workspaceToWikiLink('/Users/vn/ws/foo', ''), 'Users-vn-ws-foo');
+    });
+
+    it('U-51: gitRemoteToWikiLink strips https protocol', () => {
+        assert.strictEqual(gitRemoteToWikiLink('https://github.com/user/repo'), 'github.com-user-repo');
+    });
+
+    it('U-52: gitRemoteToWikiLink with prefix', () => {
+        assert.strictEqual(gitRemoteToWikiLink('https://github.com/user/repo', 'projects/'), 'projects/github.com-user-repo');
+    });
+
+    it('U-53: gitRemoteToWikiLink strips http protocol', () => {
+        assert.strictEqual(gitRemoteToWikiLink('http://gitlab.com/org/proj'), 'gitlab.com-org-proj');
     });
 
     it('U-42: readWorkspaceName from workspace.json', () => {
