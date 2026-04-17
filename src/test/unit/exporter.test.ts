@@ -598,8 +598,8 @@ describe('Helpers', () => {
         assert.strictEqual(workspaceToWikiLink('ws'), 'ws');
     });
 
-    it('U-48: workspaceToWikiLink handles Windows-style path with forward slashes', () => {
-        assert.strictEqual(workspaceToWikiLink('C:/Users/vn/project'), 'C:-Users-vn-project');
+    it('U-48: workspaceToWikiLink sanitizes Windows-style path', () => {
+        assert.strictEqual(workspaceToWikiLink('C:/Users/vn/project'), 'C-Users-vn-project');
     });
 
     it('U-49: workspaceToWikiLink with prefix', () => {
@@ -620,6 +620,18 @@ describe('Helpers', () => {
 
     it('U-53: gitRemoteToWikiLink strips http protocol', () => {
         assert.strictEqual(gitRemoteToWikiLink('http://gitlab.com/org/proj'), 'gitlab.com-org-proj');
+    });
+
+    it('U-54: gitRemoteToWikiLink sanitizes port number', () => {
+        assert.strictEqual(gitRemoteToWikiLink('https://gitlab.example.com:8080/org/repo'), 'gitlab.example.com-8080-org-repo');
+    });
+
+    it('U-55: gitRemoteToWikiLink sanitizes user@ in URL', () => {
+        assert.strictEqual(gitRemoteToWikiLink('https://user@github.com/org/repo'), 'user-github.com-org-repo');
+    });
+
+    it('U-56: gitRemoteToWikiLink sanitizes query and fragment', () => {
+        assert.strictEqual(gitRemoteToWikiLink('https://github.com/org/repo?ref=main#readme'), 'github.com-org-repo-ref-main-readme');
     });
 
     it('U-42: readWorkspaceName from workspace.json', () => {

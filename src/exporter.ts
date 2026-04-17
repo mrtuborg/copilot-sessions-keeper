@@ -680,12 +680,24 @@ export function yamlEscape(text: string): string {
 }
 
 /**
+ * Sanitize a string for use as a filename / Obsidian wiki-link target.
+ * Replaces characters unsafe for filenames (on any OS) with hyphens,
+ * then collapses runs of hyphens and trims.
+ */
+function sanitizeForFilename(s: string): string {
+    return s
+        .replace(/[\\/:*?"<>|#\[\]^@&=+%{}~`!]/g, '-')
+        .replace(/-{2,}/g, '-')
+        .replace(/^-+|-+$/g, '');
+}
+
+/**
  * Convert a workspace path to an Obsidian wiki-link target.
  * Strips the leading slash and replaces remaining slashes with hyphens.
  * e.g. "/Users/vn/ws/my-project" → "Users-vn-ws-my-project"
  */
 export function workspaceToWikiLink(workspace: string, prefix?: string): string {
-    const slug = workspace.replace(/^\//, '').replace(/\//g, '-');
+    const slug = sanitizeForFilename(workspace.replace(/^\//, '').replace(/\//g, '-'));
     return prefix ? prefix + slug : slug;
 }
 
@@ -695,7 +707,7 @@ export function workspaceToWikiLink(workspace: string, prefix?: string): string 
  * e.g. "https://github.com/user/repo" → "github.com-user-repo"
  */
 export function gitRemoteToWikiLink(remoteUrl: string, prefix?: string): string {
-    const slug = remoteUrl.replace(/^https?:\/\//, '').replace(/\//g, '-');
+    const slug = sanitizeForFilename(remoteUrl.replace(/^https?:\/\//, '').replace(/\//g, '-'));
     return prefix ? prefix + slug : slug;
 }
 
